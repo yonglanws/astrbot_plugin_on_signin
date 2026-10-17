@@ -43,6 +43,17 @@ MASTERDATA_FILES = [
 RARITY_NAME = {2: 'R', 3: 'SR', 4: 'SSR', 20: 'BD'}
 
 
+def _format_level(value):
+    """把难度数值格式化为展示文本：19.0 -> "19"，25.5 -> "25.5" """
+    if value is None or value == '':
+        return ''
+    if isinstance(value, str):
+        return value
+    if float(value).is_integer():
+        return str(int(value))
+    return ('%g' % value)
+
+
 def _secure_random_choice(items):
     """使用加密级随机数生成器进行公平选择"""
     if not items:
@@ -205,6 +216,7 @@ TMPL = """
         }
 
         /* 立绘层：铺满画布，置于左侧面板之下 */
+        /* 立绘层：铺满画布，置于左侧面板之下；立绘按原图比例放大到接近全高 */
         .character-layer {
             position: absolute;
             top: 0;
@@ -213,15 +225,16 @@ TMPL = """
             height: 100%;
             z-index: 1;
             pointer-events: none;
+            overflow: hidden;
         }
 
         .character-layer img {
             position: absolute;
-            right: 0;
-            bottom: 0;
-            height: 100%;
+            right: -6%;
+            bottom: -4%;
+            height: 116%;
             width: auto;
-            max-width: 62%;
+            max-width: 92%;
             object-fit: contain;
             object-position: right bottom;
             filter: drop-shadow(0 12px 28px rgba(0,0,0,0.35));
@@ -734,7 +747,7 @@ TMPL = """
             {% endif %}
 
             <div class="footer">
-                {{footer_text}}
+                Designed by 慵懒午睡 | 请勿迷信哦
             </div>
         </div>
         <!-- 右侧面板：卡面信息 -->
@@ -1061,10 +1074,11 @@ class MyPlugin(Star):
         text = {x.get('_id', ''): x for x in text_table}
 
         def tc(key, default=''):
+            """取简体中文文案，缺失时按 繁体 → 日文 兜底"""
             entry = text.get(key)
             if not entry:
                 return default
-            return (entry.get('_traditionalChinese') or entry.get('_simplifiedChinese')
+            return (entry.get('_simplifiedChinese') or entry.get('_traditionalChinese')
                     or entry.get('_japanese') or default)
 
         music_list = tables.get('MasterLiveMusic', {}).get('_allData', [])
@@ -1086,6 +1100,10 @@ class MyPlugin(Star):
                 c = charmap.get(vid)
                 if c:
                     vocalists.append({'id': vid, 'name': tc(c['_nameTextID'], '')})
+            # 演唱团体：优先乐队名，无乐队时退回主唱名
+            artist_names = [band_name.get(b, '') for b in s.get('_bandIDs', []) if band_name.get(b)]
+            if not artist_names:
+                artist_names = [v['name'] for v in vocalists if v['name']]
             songs.append({
                 'id': s['_id'],
                 'title': tc(s['_titleTextID'], ''),
@@ -1096,6 +1114,7 @@ class MyPlugin(Star):
                 'arranger': tc(s['_arrangerTextID'], ''),
                 'band_ids': s.get('_bandIDs', []),
                 'band_names': [band_name.get(b, '') for b in s.get('_bandIDs', [])],
+                'artist': ' / '.join(artist_names),
                 'music_type': s.get('_musicType', 0),
                 'difficulties': {
                     'hard': {
@@ -1202,13 +1221,13 @@ class MyPlugin(Star):
         bg_b64 = ""
         try:
             data = self._fetch_image(self._card_asset_url(asset_id, "member_character"), f"card_{asset_id}_char")
-            char_b64 = self._image_to_base64(data, max_size=1200, quality=82, fmt="WEBP")
+            char_b64 = self._image_to_base64(data, max_size=1920, quality=88, fmt="WEBP")
         except Exception as e:
             logger.warning(f"⚠️ 下载立绘失败 card={asset_id}: {e}")
 
         try:
             data = self._fetch_image(self._card_asset_url(asset_id, "member_background"), f"card_{asset_id}_bg")
-            bg_b64 = self._image_to_base64(data, max_size=1600, quality=85, fmt="WEBP")
+            bg_b64 = self._image_to_base64(data, max_size=1920, quality=88, fmt="WEBP")
         except Exception as e:
             logger.warning(f"⚠️ 下载背景失败 card={asset_id}: {e}")
 
@@ -1402,15 +1421,15 @@ class MyPlugin(Star):
             cover_base64 = self._get_song_cover(song.get('jacket', ''))
 
             title = song.get('title') or song.get('title_ja') or '未知歌曲'
-            composer = song.get('composer') or ''
+            artist = song.get('artist') or song.get('composer') or ''
 
             result.append({
-                "name": composer,
+                "name": artist,
                 "name_cn": title,
                 "id": song.get('id'),
                 "cover_base64": cover_base64,
                 "difficulty_type": song.get('difficulty_type'),
-                "difficulty_level": song.get('difficulty_level'),
+                "difficulty_level": _format_level(song.get('difficulty_level')),
                 "difficulty_label": song.get('difficulty_label')
             })
 
@@ -1607,7 +1626,7 @@ class MyPlugin(Star):
                 streak_days = 1
 
             try:
-                signed_dates = user_stats.get('signed_dates', []) if self.config.get('show_calendar', True) else []
+                signed_dates = user_stats.get('signed_dates', [])
             except Exception as e:
                 logger.warning(f"获取签到日期失败: {e}")
                 signed_dates = []
@@ -1661,7 +1680,7 @@ class MyPlugin(Star):
             ji_text = self._get_ji_activity()
 
             try:
-                songs = self._get_random_song() if self.config.get('show_song_recommendation', True) else None
+                songs = self._get_random_song()
             except Exception as e:
                 logger.warning(f"获取推荐歌曲失败: {e}")
                 songs = None
@@ -1755,20 +1774,19 @@ class MyPlugin(Star):
                 "song_name_cn": song1.get("name_cn", "名称：未知歌曲"),
                 "song_cover_base64": song1.get("cover_base64", ""),
                 "song_difficulty_type": song1.get("difficulty_type") or "",
-                "song_difficulty_level": song1.get("difficulty_level") or "",
+                "song_difficulty_level": _format_level(song1.get("difficulty_level")),
                 "song_difficulty_label": song1.get("difficulty_label") or "",
                 "song2_name": song2.get("name", ""),
                 "song2_name_cn": song2.get("name_cn", "名称：未知歌曲"),
                 "song2_cover_base64": song2.get("cover_base64", ""),
                 "song2_difficulty_type": song2.get("difficulty_type") or "",
-                "song2_difficulty_level": song2.get("difficulty_level") or "",
+                "song2_difficulty_level": _format_level(song2.get("difficulty_level")),
                 "song2_difficulty_label": song2.get("difficulty_label") or "",
-                "show_song": bool(self.config.get('show_song_recommendation', True)),
+                "show_song": True,
                 "card_rarity_name": card.get('rarity_name', ''),
                 "card_rarity_class": rarity_class,
                 "card_character_name": card.get('character_name', ''),
-                "card_subtitle": card.get('subtitle', ''),
-                "footer_text": self.config.get('footer_text', 'OurNotes 签到 by 慵懒午睡 | 请勿迷信哦🥺')
+                "card_subtitle": card.get('subtitle', '')
             }
 
             url = await self.html_render(TMPL, render_data, options=options)

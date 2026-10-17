@@ -205,14 +205,25 @@ check("every character has characterId", all(c.get("characterId") for c in chars
 check("every character has name slug", all(c.get("name") for c in chars))
 check("every character has aliases", all(c.get("aliases") for c in chars))
 check("every character has bandName", all(c.get("bandName") for c in chars))
+# 角色名以简体中文为主
+check("fullNameChinese is simplified (no 燈/靈/曉 style traditional chars in main field)",
+      all("燈" not in c["fullNameChinese"] and "寧" not in c["fullNameChinese"]
+          and "櫻" not in c["fullNameChinese"] and "麥" not in c["fullNameChinese"] for c in chars),
+      str([c["fullNameChinese"] for c in chars if any(t in c["fullNameChinese"] for t in "燈寧櫻麥")]))
+check("tomori is 高松灯 (simplified)",
+      next(c for c in chars if c["name"] == "tomori")["fullNameChinese"] == "高松灯")
+# 繁体名保留为别名，便于繁体用户检索
+check("traditional variants kept as aliases",
+      "高松燈" in next(c for c in chars if c["name"] == "tomori")["aliases"]
+      and "四宮寧月" in next(c for c in chars if c["name"] == "shizuku")["aliases"])
 # 跨游戏检查：不应再出现世界计划角色
-# 注意 shizuku 是 OurNotes 的四宮寧月（band 5），不是世界计划的日野森雫，此处不应列入
+# 注意 shizuku 是 OurNotes 的四宫宁月（band 5），不是世界计划的日野森雫，此处不应列入
 pjsk_only = {"ick", "saki", "hnm", "shiho", "mnr", "hrk", "airi", "szk", "khn", "an", "akt", "toya",
              "emu", "nene", "rui", "haruka", "knd", "ena", "mzk", "mfy"}
 names = {c["name"] for c in chars}
 check("no pjsk-only slugs remain", not (names & pjsk_only), str(names & pjsk_only))
-check("OurNotes shizuku is 四宮寧月 (band 5), not pjsk 日野森雫",
-      next(c for c in chars if c["name"] == "shizuku")["fullNameChinese"] == "四宮寧月")
+check("OurNotes shizuku is 四宫宁月 (band 5), not pjsk 日野森雫",
+      next(c for c in chars if c["name"] == "shizuku")["fullNameChinese"] == "四宫宁月")
 check("OurNotes characters present",
       {"tomori", "anon", "rana", "soyo", "taki", "doloris", "mortis", "amoris"} <= names,
       str(sorted(names)))
@@ -294,6 +305,59 @@ for _ in range(100):
 else:
     check("random card is always SR+/BD", True)
 inst.db.close()
+
+print()
+print("=" * 70)
+print("TEST 4d: difficulty formatting / artist / footer / removed config")
+print("=" * 70)
+# 19.0 应显示为 "19"，25.5 仍显示 "25.5"
+check("_format_level(19.0) == '19'", plugin_main._format_level(19.0) == "19", repr(plugin_main._format_level(19.0)))
+check("_format_level(20.5) == '20.5'", plugin_main._format_level(20.5) == "20.5", repr(plugin_main._format_level(20.5)))
+check("_format_level(25) == '25'", plugin_main._format_level(25) == "25", repr(plugin_main._format_level(25)))
+check("_format_level(29.0) == '29'", plugin_main._format_level(29.0) == "29", repr(plugin_main._format_level(29.0)))
+check("_format_level(None) == ''", plugin_main._format_level(None) == "", repr(plugin_main._format_level(None)))
+check("_format_level('') == ''", plugin_main._format_level("") == "", repr(plugin_main._format_level("")))
+check("_format_level keeps non-integer decimals",
+      plugin_main._format_level(25.7) == "25.7" and plugin_main._format_level(26.9) == "26.9")
+
+# 歌曲作者栏应为演唱团体
+check("every song has artist", all(s.get("artist") for s in songs),
+      str([s["id"] for s in songs if not s.get("artist")]))
+check("artist is a band name for banded songs",
+      all(any(b in s["artist"] for b in s.get("band_names", [])) for s in songs if s.get("band_names")),
+      str([(s["id"], s["artist"], s["band_names"]) for s in songs[:5]]))
+
+# 底部文字限死，不走配置
+src_main = (PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
+check("footer hardcoded to 'Designed by 慵懒午睡'",
+      "Designed by 慵懒午睡" in src_main and "{{footer_text}}" not in src_main)
+check("footer_text config no longer read",
+      "config.get('footer_text'" not in src_main and 'config.get("footer_text"' not in src_main)
+
+# 歌曲推荐与签到日期改为始终启用
+check("show_song no longer config-gated", "show_song_recommendation" not in src_main)
+check("show_calendar no longer config-gated", "show_calendar" not in src_main)
+check("render_data sets show_song True unconditionally", '"show_song": True,' in src_main)
+
+# 配置 schema 已移除这三项
+schema = json.loads((PLUGIN_DIR / "_conf_schema.json").read_text(encoding="utf-8"))
+for gone in ("footer_text", "show_song_recommendation", "show_calendar"):
+    check(f"schema no longer exposes {gone}", gone not in schema, str(sorted(schema)))
+check("schema keeps sign_in_command/history_keep_days/auto_sync_masterdata",
+      {"sign_in_command", "history_keep_days", "auto_sync_masterdata"} <= set(schema), str(sorted(schema)))
+
+# 立绘层显著放大：高度 >100% 且允许溢出画布
+import re as _re
+m_char = _re.search(r"\.character-layer img \{(.*?)\}", src_main, _re.S)
+check("character-layer img rule found", m_char is not None)
+if m_char:
+    rule = m_char.group(1)
+    h = _re.search(r"height:\s*([\d.]+)%", rule)
+    check("character art height exceeds viewport (enlarged)",
+          h is not None and float(h.group(1)) > 100, rule.strip()[:200])
+    check("character art anchored right/bottom with overflow room",
+          "right:" in rule and "bottom:" in rule and "-" in rule, rule.strip()[:200])
+check("character layer clips overflow", "overflow: hidden" in src_main)
 
 print()
 print("=" * 70)

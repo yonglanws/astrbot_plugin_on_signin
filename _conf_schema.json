@@ -16,23 +16,5 @@
         "type": "bool",
         "hint": "开启后每天自动从 GitHub 拉取繁中服（hk-tw-mo）最新 master 文件，同步歌曲名、难度与新增卡面。也可随时发送「同步卡面数据」手动触发",
         "default": true
-    },
-    "show_song_recommendation": {
-        "description": "是否显示今日歌曲推荐",
-        "type": "bool",
-        "hint": "关闭后签到卡片不再展示每日推荐歌曲（HARD / EXPERT 两首）",
-        "default": true
-    },
-    "show_calendar": {
-        "description": "是否展示本月签到记录",
-        "type": "bool",
-        "hint": "控制是否查询并展示本月已签到日期",
-        "default": true
-    },
-    "footer_text": {
-        "description": "卡片底部文字",
-        "type": "string",
-        "hint": "显示在签到卡片最下方的一行文字",
-        "default": "OurNotes 签到 by 慵懒午睡 | 请勿迷信哦🥺"
     }
 }

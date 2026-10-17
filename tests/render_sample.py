@@ -69,6 +69,14 @@ def fetch_bytes(url: str, timeout: int = 90) -> bytes:
         return r.read()
 
 
+def _fmt(v):
+    if v is None or v == "":
+        return ""
+    if isinstance(v, str):
+        return v
+    return str(int(v)) if float(v).is_integer() else ("%g" % v)
+
+
 def to_data_uri(data: bytes, max_size: int, quality: int) -> str:
     from PIL import Image
     img = Image.open(io.BytesIO(data))
@@ -118,26 +126,32 @@ def main():
     # 固定随机种子，保证样例可复现
     random.seed(20261017)
 
-    # 挑一张有代表性的卡面：BD（生日卡）优先，否则 SR
-    bd = [c for c in cards if c["rarity_name"] == "BD"]
-    card = bd[0] if bd else next(c for c in cards if c["rarity_name"] == "SR")
+    # 卡面可用命令行参数指定：SSR 卡 asset_id 或留空按 BD→SSR→SR 挑
+    want = sys.argv[1] if len(sys.argv) > 1 else ""
+    if want:
+        card = next(c for c in cards if str(c["asset_id"]) == want)
+    else:
+        bd = [c for c in cards if c["rarity_name"] == "BD"]
+        ssr = [c for c in cards if c["rarity_name"] == "SSR"]
+        sr = [c for c in cards if c["rarity_name"] == "SR"]
+        card = (bd or ssr or sr)[0]
     print(f"🃏 选用卡面: {card['rarity_name']} {card['character_name']} 「{card['subtitle']}」 (asset_id={card['asset_id']})")
 
     # 下载立绘与背景
     print("⬇️ 下载立绘 / 背景 ...")
     char_uri = to_data_uri(
         fetch_bytes(f"https://assets.bdon.moe/zh-Hans/MemberCard/{card['asset_id']}/member_character/member_character.webp"),
-        max_size=1200, quality=82)
+        max_size=1920, quality=88)
     bg_uri = to_data_uri(
         fetch_bytes(f"https://assets.bdon.moe/zh-Hans/MemberCard/{card['asset_id']}/member_background/member_background.webp"),
-        max_size=1600, quality=85)
+        max_size=1920, quality=88)
     print(f"   立绘 data-uri {len(char_uri)//1024} KB, 背景 data-uri {len(bg_uri)//1024} KB")
 
     # 选两首难度相近的歌
     picks = plugin_main.select_song_with_difficulty(songs)
     print("🎵 推荐歌曲:")
     for p in picks:
-        print(f"   {p['title']}  [{p['difficulty_label']} {p['difficulty_level']}]  composer={p['composer']}")
+        print(f"   {p['title']}  [{p['difficulty_label']} {_fmt(p['difficulty_level'])}]  artist={p.get('artist') or p.get('composer')}")
 
     covers = []
     for p in picks:
@@ -171,24 +185,23 @@ def main():
         "ji_text": "熬夜追更",
         "streak_days": 7,
         "signed_dates": [datetime.now().day],
-        "song_name": picks[0].get("composer", ""),
+        "song_name": picks[0].get("artist") or picks[0].get("composer", ""),
         "song_name_cn": picks[0]["title"],
         "song_cover_base64": covers[0],
         "song_difficulty_type": picks[0]["difficulty_type"],
-        "song_difficulty_level": picks[0]["difficulty_level"],
+        "song_difficulty_level": _fmt(picks[0]["difficulty_level"]),
         "song_difficulty_label": picks[0]["difficulty_label"],
-        "song2_name": picks[1].get("composer", ""),
+        "song2_name": picks[1].get("artist") or picks[1].get("composer", ""),
         "song2_name_cn": picks[1]["title"],
         "song2_cover_base64": covers[1],
         "song2_difficulty_type": picks[1]["difficulty_type"],
-        "song2_difficulty_level": picks[1]["difficulty_level"],
+        "song2_difficulty_level": _fmt(picks[1]["difficulty_level"]),
         "song2_difficulty_label": picks[1]["difficulty_label"],
         "show_song": True,
         "card_rarity_name": card["rarity_name"],
         "card_rarity_class": rarity_class,
         "card_character_name": card["character_name"],
         "card_subtitle": card["subtitle"],
-        "footer_text": "OurNotes 签到 by 慵懒午睡 | 请勿迷信哦🥺",
     }
 
     # jinja2 渲染（与插件一致）
@@ -241,7 +254,7 @@ def main():
     if not is_image:
         print("⚠️ 返回的不是图片：", img_bytes[:300])
         return 1
-    out_path = OUT_DIR / "signin_sample.jpg"
+    out_path = OUT_DIR / f"signin_{card['rarity_name'].lower()}_{card['asset_id']}.jpg"
     out_path.write_bytes(img_bytes)
     print(f"✅ 已保存 {out_path} ({len(img_bytes)//1024} KB)")
 

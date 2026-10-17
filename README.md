@@ -73,23 +73,25 @@ plugin_data/astrbot_plugin_on_signin/
 | `sign_in_command` | string | `签到` | 触发指令 |
 | `history_keep_days` | int | `365` | 签到历史保留天数，过期数据每日自动清理 |
 | `auto_sync_masterdata` | bool | `true` | 是否每天自动同步 master 数据 |
-| `show_song_recommendation` | bool | `true` | 是否显示今日歌曲推荐 |
-| `show_calendar` | bool | `true` | 是否查询本月签到日期 |
-| `footer_text` | string | `OurNotes 签到 by 慵懒午睡 \| 请勿迷信哦🥺` | 卡片底部文字 |
 
 在 AstrBot WebUI 插件设置页面修改后重载即可。
 
+以下内容固定启用，不提供配置项：今日歌曲推荐、本月签到日期查询、卡片底部文字
+（固定为 `Designed by 慵懒午睡 | 请勿迷信哦`）。
+
 ## 角色别名
 
-角色名与别名写在插件目录的 `characters.json` 里，包含 25 位角色的中文名、日文名、英文名、
-罗马字简称与乐队信息。要加别名直接改这个文件即可，例如：
+角色名与别名写在插件目录的 `characters.json` 里，包含 25 位角色的简体中文名、繁体名、
+日文名、英文名、罗马字简称与乐队信息。主名用简体中文，繁体名保留在 `aliases` 里方便检索。
+要加别名直接改这个文件即可，例如：
 
 ```json
 {
   "characterId": 10,
   "name": "oblivionis",
-  "fullNameChinese": "Oblivionis / 豐川祥子",
-  "aliases": ["oblivionis", "祥子", "豊川祥子", "オブリビオニス"]
+  "fullNameChinese": "Oblivionis / 丰川祥子",
+  "fullNameTraditional": "Oblivionis / 豐川祥子",
+  "aliases": ["oblivionis", "祥子", "丰川祥子", "豐川祥子", "オブリビオニス"]
 }
 ```
 
@@ -109,6 +111,8 @@ A: 复制持久化目录下的 `signin.db`。
 ```bash
 python tests/test_plugin_logic.py    # 逻辑 + SQLite + 云端资产可达性测试
 python tests/render_sample.py        # 通过 t2i 服务渲染样例卡片
+python tests/render_sample.py 56     # 指定 SSR 卡 asset_id 渲染
 ```
 
 `tests/render_sample.py` 默认连 `http://192.168.31.54:8999`，可用环境变量 `ASTRBOT_T2I` 覆盖。
+不传参数时按 BD → SSR → SR 的顺序挑卡；传卡面 `asset_id` 可指定渲染某一张。
