@@ -1,0 +1,3074 @@
+{
+ "meta": {
+  "source": "https://github.com/StarMoe-org/moenotes-masterdata/tree/main/hk-tw-mo",
+  "server": "hk-tw (繁中服)",
+  "generated_at": "2026-10-17T16:58:52",
+  "asset_base": "https://assets.bdon.moe/zh-Hans"
+ },
+ "songs": [
+  {
+   "id": 100001,
+   "title": "迷星叫",
+   "title_ja": "迷星叫",
+   "jacket": "jkt_001_100001",
+   "composer": "長谷川大介(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.5
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110001
+  },
+  {
+   "id": 100002,
+   "title": "壹雫空",
+   "title_ja": "壱雫空",
+   "jacket": "jkt_001_100002",
+   "composer": "hisakuni(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "hisakuni(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 21,
+     "display": 21.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110002
+  },
+  {
+   "id": 100003,
+   "title": "碧天伴走",
+   "title_ja": "碧天伴走",
+   "jacket": "jkt_001_100003",
+   "composer": "木下龍平(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "木下龍平(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110003
+  },
+  {
+   "id": 100004,
+   "title": "影色舞",
+   "title_ja": "影色舞",
+   "jacket": "jkt_001_100004",
+   "composer": "木下龍平(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "木下龍平(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.7
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110004
+  },
+  {
+   "id": 100005,
+   "title": "潛在表明",
+   "title_ja": "潜在表明",
+   "jacket": "jkt_001_100005",
+   "composer": "鈴木裕明(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "鈴木裕明(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110005
+  },
+  {
+   "id": 100006,
+   "title": "音一會",
+   "title_ja": "音一会",
+   "jacket": "jkt_001_100006",
+   "composer": "尾崎豪(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "尾崎豪(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110006
+  },
+  {
+   "id": 100007,
+   "title": "春日影(MyGO!!!!! ver.)",
+   "title_ja": "春日影 (MyGO!!!!! ver.)",
+   "jacket": "jkt_001_100007",
+   "composer": "藤田淳平（Elements Garden）",
+   "lyricist": "織田あすか（Elements Garden）",
+   "arranger": "藤田淳平（Elements Garden）",
+   "band_ids": [
+    1
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 15,
+     "display": 15.0
+    },
+    "expert": {
+     "level": 20,
+     "display": 20.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110007
+  },
+  {
+   "id": 100008,
+   "title": "詩超絆",
+   "title_ja": "詩超絆",
+   "jacket": "jkt_001_100008",
+   "composer": "橫地健太(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "橫地健太(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110008
+  },
+  {
+   "id": 100009,
+   "title": "迷路日日",
+   "title_ja": "迷路日々",
+   "jacket": "jkt_001_100009",
+   "composer": "松坂康司(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "松坂康司(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110009
+  },
+  {
+   "id": 100010,
+   "title": "無路矢",
+   "title_ja": "無路矢",
+   "jacket": "jkt_001_100010",
+   "composer": "庄司夏葵(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "庄司夏葵(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110010
+  },
+  {
+   "id": 100011,
+   "title": "名無聲",
+   "title_ja": "名無声",
+   "jacket": "jkt_001_100011",
+   "composer": "金崎真士(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "金崎真士(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110011
+  },
+  {
+   "id": 100012,
+   "title": "步拾道",
+   "title_ja": "歩拾道",
+   "jacket": "jkt_001_100012",
+   "composer": "庄司夏葵(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "庄司夏葵(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110012
+  },
+  {
+   "id": 100013,
+   "title": "端程山",
+   "title_ja": "端程山",
+   "jacket": "jkt_001_100013",
+   "composer": "トミタカズキ(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "トミタカズキ(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110013
+  },
+  {
+   "id": 100014,
+   "title": "砂寸奏",
+   "title_ja": "砂寸奏",
+   "jacket": "jkt_001_100014",
+   "composer": "槇島隆人(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "槇島隆人(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110014
+  },
+  {
+   "id": 100015,
+   "title": "焚音打",
+   "title_ja": "焚音打",
+   "jacket": "jkt_001_100015",
+   "composer": "長谷川大介(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 23,
+     "display": 23.0
+    },
+    "expert": {
+     "level": 29,
+     "display": 29.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110015
+  },
+  {
+   "id": 100016,
+   "title": "聿日箋秋",
+   "title_ja": "聿日箋秋",
+   "jacket": "jkt_001_100016",
+   "composer": "トミタカズキ(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "トミタカズキ(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.4
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110016
+  },
+  {
+   "id": 100017,
+   "title": "証命讚歌",
+   "title_ja": "証命讃歌",
+   "jacket": "jkt_001_100017",
+   "composer": "田邊駿一",
+   "lyricist": "田邊駿一",
+   "arranger": "高橋涼(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 22,
+     "display": 22.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110017
+  },
+  {
+   "id": 100018,
+   "title": "ないものねだり",
+   "title_ja": "ないものねだり",
+   "jacket": "jkt_001_100018",
+   "composer": "谷口 鮪",
+   "lyricist": "谷口 鮪",
+   "arranger": "植木建象、神田ジョン(from PENGUIN RESEARCH)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 21,
+     "display": 21.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10120018
+  },
+  {
+   "id": 100019,
+   "title": "シャルル",
+   "title_ja": "シャルル",
+   "jacket": "jkt_001_100019",
+   "composer": "バルーン",
+   "lyricist": "バルーン",
+   "arranger": "植木建象、神田ジョン(from PENGUIN RESEARCH)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 16,
+     "display": 16.0
+    },
+    "expert": {
+     "level": 21,
+     "display": 21.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10120019
+  },
+  {
+   "id": 100020,
+   "title": "空に歌えば",
+   "title_ja": "空に歌えば",
+   "jacket": "jkt_001_100020",
+   "composer": "秋田　ひろむ",
+   "lyricist": "秋田　ひろむ",
+   "arranger": "植木建象、神田ジョン(from PENGUIN RESEARCH)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 22,
+     "display": 22.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10120020
+  },
+  {
+   "id": 100021,
+   "title": "青春コンプレックス",
+   "title_ja": "青春コンプレックス",
+   "jacket": "jkt_001_100021",
+   "composer": "音羽-otoha-",
+   "lyricist": "樋口愛",
+   "arranger": "植木建象、神田ジョン(from PENGUIN RESEARCH)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10120021
+  },
+  {
+   "id": 100026,
+   "title": "Ave Mujica",
+   "title_ja": "Ave Mujica",
+   "jacket": "jkt_002_100026",
+   "composer": "上松範康（Elements Garden）",
+   "lyricist": "上松範康（Elements Garden）、織田あすか（Elements Garden）",
+   "arranger": "藤間仁（Elements Garden）",
+   "band_ids": [
+    2
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 21,
+     "display": 21.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210026
+  },
+  {
+   "id": 100027,
+   "title": "KiLLKiSS",
+   "title_ja": "KiLLKiSS",
+   "jacket": "jkt_002_100027",
+   "composer": "長谷川大介(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 21,
+     "display": 21.0
+    },
+    "expert": {
+     "level": 28,
+     "display": 28.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210027
+  },
+  {
+   "id": 100028,
+   "title": "Imprisoned XII",
+   "title_ja": "Imprisoned XII",
+   "jacket": "jkt_002_100028",
+   "composer": "松坂康司(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "松坂康司(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 22,
+     "display": 22.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210028
+  },
+  {
+   "id": 100029,
+   "title": "Crucifix X",
+   "title_ja": "Crucifix X",
+   "jacket": "jkt_002_100029",
+   "composer": "o-saka(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "o-saka(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 16,
+     "display": 16.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210029
+  },
+  {
+   "id": 100030,
+   "title": "八芒星之舞",
+   "title_ja": "八芒星ダンス",
+   "jacket": "jkt_002_100030",
+   "composer": "あらケン(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "あらケン(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210030
+  },
+  {
+   "id": 100031,
+   "title": "顏",
+   "title_ja": "顔",
+   "jacket": "jkt_002_100031",
+   "composer": "木下龍平(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "木下龍平(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210031
+  },
+  {
+   "id": 100032,
+   "title": "天球的Música",
+   "title_ja": "天球(そら)のMúsica",
+   "jacket": "jkt_002_100032",
+   "composer": "高橋涼(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "高橋涼(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210032
+  },
+  {
+   "id": 100033,
+   "title": "Symbol I : △",
+   "title_ja": "Symbol I : △",
+   "jacket": "jkt_002_100033",
+   "composer": "長谷川大介(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210033
+  },
+  {
+   "id": 100034,
+   "title": "Symbol II : 🜁",
+   "title_ja": "Symbol II : 🜁",
+   "jacket": "jkt_002_100034",
+   "composer": "高橋涼(SUPA LOVE)",
+   "lyricist": "Diggy-MO’",
+   "arranger": "高橋涼(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.5
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210034
+  },
+  {
+   "id": 100035,
+   "title": "Symbol III : ▽",
+   "title_ja": "Symbol III : ▽",
+   "jacket": "jkt_002_100035",
+   "composer": "トミタカズキ(SUPA LOVE)、Diggy-MO'",
+   "lyricist": "Diggy-MO’",
+   "arranger": "トミタカズキ(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 15,
+     "display": 15.0
+    },
+    "expert": {
+     "level": 21,
+     "display": 21.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210035
+  },
+  {
+   "id": 100036,
+   "title": "Symbol IV : 🜃",
+   "title_ja": "Symbol IV : 🜃",
+   "jacket": "jkt_002_100036",
+   "composer": "長谷川大介(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210036
+  },
+  {
+   "id": 100037,
+   "title": "Ether",
+   "title_ja": "Ether",
+   "jacket": "jkt_002_100037",
+   "composer": "長谷川大介(SUPA LOVE)、Diggy-MO’",
+   "lyricist": "Diggy-MO’",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210037
+  },
+  {
+   "id": 100038,
+   "title": "黑色生日",
+   "title_ja": "黒のバースデイ",
+   "jacket": "jkt_002_100038",
+   "composer": "賀佐泰洋(SUPA LOVE)",
+   "lyricist": "Diggy-MO’",
+   "arranger": "賀佐泰洋(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.3
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210038
+  },
+  {
+   "id": 100039,
+   "title": "Choir ‘S’ Choir",
+   "title_ja": "Choir ‘S’ Choir",
+   "jacket": "jkt_002_100039",
+   "composer": "角本麻衣 (SUPA LOVE)",
+   "lyricist": "Diggy-MO’",
+   "arranger": "角本麻衣 (SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210039
+  },
+  {
+   "id": 100040,
+   "title": "Mas?uerade Rhapsody Re?uest",
+   "title_ja": "Mas?uerade Rhapsody Re?uest",
+   "jacket": "jkt_002_100040",
+   "composer": "あらケン(SUPA LOVE)",
+   "lyricist": "Diggy-MO’",
+   "arranger": "あらケン(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 22,
+     "display": 22.0
+    },
+    "expert": {
+     "level": 28,
+     "display": 28.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210040
+  },
+  {
+   "id": 100041,
+   "title": "残酷な天使のテーゼ",
+   "title_ja": "残酷な天使のテーゼ",
+   "jacket": "jkt_002_100041",
+   "composer": "佐藤英敏",
+   "lyricist": "及川眠子",
+   "arranger": "植木建象、冬真",
+   "band_ids": [
+    2
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.9
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10220041
+  },
+  {
+   "id": 100042,
+   "title": "堕天",
+   "title_ja": "堕天",
+   "jacket": "jkt_002_100042",
+   "composer": "DJ松永",
+   "lyricist": "R-指定",
+   "arranger": "UYKADO",
+   "band_ids": [
+    2
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10220042
+  },
+  {
+   "id": 100043,
+   "title": "暗黒天国",
+   "title_ja": "暗黒天国",
+   "jacket": "jkt_002_100043",
+   "composer": "片倉　三起也",
+   "lyricist": "宝野　アリカ",
+   "arranger": "UYKADO",
+   "band_ids": [
+    2
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10220043
+  },
+  {
+   "id": 100044,
+   "title": "KINGS",
+   "title_ja": "KINGS",
+   "jacket": "jkt_002_100044",
+   "composer": "atsuko/KATSU",
+   "lyricist": "atsuko",
+   "arranger": "UYKADO",
+   "band_ids": [
+    2
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10220044
+  },
+  {
+   "id": 100047,
+   "title": "ファタール",
+   "title_ja": "ファタール",
+   "jacket": "jkt_002_100047",
+   "composer": "キタニタツヤ",
+   "lyricist": "キタニタツヤ",
+   "arranger": "植木建象、加藤貴之",
+   "band_ids": [
+    2
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10220047
+  },
+  {
+   "id": 100050,
+   "title": "†動物派對†正在舉行†",
+   "title_ja": "†animaるパーティ†開催中†",
+   "jacket": "jkt_003_100050",
+   "composer": "堀江晶太",
+   "lyricist": "堀江晶太",
+   "arranger": "堀江晶太",
+   "band_ids": [
+    3
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310050
+  },
+  {
+   "id": 100051,
+   "title": "Empty puppet",
+   "title_ja": "エンプティパペット",
+   "jacket": "jkt_003_100051",
+   "composer": "eba",
+   "lyricist": "吾龍",
+   "arranger": "eba",
+   "band_ids": [
+    3
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310051
+  },
+  {
+   "id": 100052,
+   "title": "限界現實Survive天使",
+   "title_ja": "限界現実サバイブ天使",
+   "jacket": "jkt_003_100052",
+   "composer": "凍堂遊維",
+   "lyricist": "凍堂遊維",
+   "arranger": "Nor、堀江晶太",
+   "band_ids": [
+    3
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310052
+  },
+  {
+   "id": 100053,
+   "title": "BIG MOUTH",
+   "title_ja": "ビッグマウス",
+   "jacket": "jkt_003_100053",
+   "composer": "堀江晶太、白神真志朗",
+   "lyricist": "白神真志朗、Sekimen",
+   "arranger": "堀江晶太、Nor",
+   "band_ids": [
+    3
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310053
+  },
+  {
+   "id": 100054,
+   "title": "夢現妄想世界",
+   "title_ja": "夢現妄想世界",
+   "jacket": "jkt_003_100054",
+   "composer": "園田健太郎",
+   "lyricist": "やしきん",
+   "arranger": "園田健太郎",
+   "band_ids": [
+    3
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310054
+  },
+  {
+   "id": 100055,
+   "title": "KOHAKU",
+   "title_ja": "コハク",
+   "jacket": "jkt_003_100055",
+   "composer": "堀江晶太",
+   "lyricist": "仲町阿拉蕾、堀江晶太",
+   "arranger": "堀江晶太",
+   "band_ids": [
+    3
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.5
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310055
+  },
+  {
+   "id": 100056,
+   "title": "這是我們的生存梗概",
+   "title_ja": "これはぼくたちの生存のあらすじ",
+   "jacket": "jkt_003_100056",
+   "composer": "田淵智也",
+   "lyricist": "田淵智也",
+   "arranger": "堀江晶太",
+   "band_ids": [
+    3
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 23,
+     "display": 23.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310056
+  },
+  {
+   "id": 100057,
+   "title": "宇宙的不可思議",
+   "title_ja": "うちゅうのふしぎ",
+   "jacket": "jkt_003_100057",
+   "composer": "sabio",
+   "lyricist": "sabio",
+   "arranger": "sabio",
+   "band_ids": [
+    3
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 16,
+     "display": 16.0
+    },
+    "expert": {
+     "level": 22,
+     "display": 22.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310057
+  },
+  {
+   "id": 100058,
+   "title": "午夜遊樂園",
+   "title_ja": "真夜中遊園地",
+   "jacket": "jkt_003_100058",
+   "composer": "哥丸雄貴",
+   "lyricist": "烏屋茶房",
+   "arranger": "哥丸雄貴、堀江晶太",
+   "band_ids": [
+    3
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 21,
+     "display": 21.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310058
+  },
+  {
+   "id": 100059,
+   "title": "Tuning",
+   "title_ja": "チューニング",
+   "jacket": "jkt_003_100059",
+   "composer": "千石由乃、堀江晶太",
+   "lyricist": "仲町阿拉蕾、千石由乃、堀江晶太",
+   "arranger": "堀江晶太、千石由乃",
+   "band_ids": [
+    3
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310059
+  },
+  {
+   "id": 100060,
+   "title": "前往超行星X之旅",
+   "title_ja": "超惑星Xへの旅",
+   "jacket": "jkt_003_100060",
+   "composer": "TeddyLoid・堀江晶太",
+   "lyricist": "堀江晶太",
+   "arranger": "TeddyLoid・堀江晶太",
+   "band_ids": [
+    3
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.5
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310060
+  },
+  {
+   "id": 100061,
+   "title": "六兆年と一夜物語",
+   "title_ja": "六兆年と一夜物語",
+   "jacket": "jkt_003_100061",
+   "composer": "kemu",
+   "lyricist": "kemu",
+   "arranger": "sabio/高村風太",
+   "band_ids": [
+    3
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 21,
+     "display": 21.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10320061
+  },
+  {
+   "id": 100062,
+   "title": "唱",
+   "title_ja": "唱",
+   "jacket": "jkt_003_100062",
+   "composer": "Giga & TeddyLoid",
+   "lyricist": "TOPHAMHAT-KYO (FAKE TYPE.)",
+   "arranger": "DjeDje、KENSEI、三村一輝",
+   "band_ids": [
+    3
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10320062
+  },
+  {
+   "id": 100063,
+   "title": "オリオンをなぞる",
+   "title_ja": "オリオンをなぞる",
+   "jacket": "jkt_003_100063",
+   "composer": "田淵智也",
+   "lyricist": "田淵智也",
+   "arranger": "岡村大輔",
+   "band_ids": [
+    3
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10320063
+  },
+  {
+   "id": 100064,
+   "title": "UNDEAD",
+   "title_ja": "UNDEAD",
+   "jacket": "jkt_003_100064",
+   "composer": "Ayase",
+   "lyricist": "Ayase",
+   "arranger": "DjeDje、三村一輝",
+   "band_ids": [
+    3
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.5
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10320064
+  },
+  {
+   "id": 100066,
+   "title": "ちゅ、多様性。",
+   "title_ja": "ちゅ、多様性。",
+   "jacket": "jkt_003_100066",
+   "composer": "真部　脩一",
+   "lyricist": "あの、真部　脩一",
+   "arranger": "白神真志朗",
+   "band_ids": [
+    3
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10320066
+  },
+  {
+   "id": 100069,
+   "title": "起死開戰",
+   "title_ja": "起死開戦",
+   "jacket": "jkt_004_100069",
+   "composer": "藤井健太郎",
+   "lyricist": "藤井健太郎",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    4
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 21,
+     "display": 21.0
+    },
+    "expert": {
+     "level": 28,
+     "display": 28.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10410069
+  },
+  {
+   "id": 100070,
+   "title": "everscape",
+   "title_ja": "everscape",
+   "jacket": "jkt_004_100070",
+   "composer": "藤井健太郎、瀬名水紀(Dream Monster)",
+   "lyricist": "藤井健太郎",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    4
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.5
+    },
+    "expert": {
+     "level": 28,
+     "display": 28.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10410070
+  },
+  {
+   "id": 100071,
+   "title": "鳴らす",
+   "title_ja": "鳴らす",
+   "jacket": "jkt_004_100071",
+   "composer": "瀬名水紀(Dream Monster)",
+   "lyricist": "瀬名水紀(Dream Monster)",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    4
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10410071
+  },
+  {
+   "id": 100072,
+   "title": "青のすみか",
+   "title_ja": "青のすみか",
+   "jacket": "jkt_004_100072",
+   "composer": "キタニタツヤ",
+   "lyricist": "キタニタツヤ",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    4
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 16,
+     "display": 16.0
+    },
+    "expert": {
+     "level": 21,
+     "display": 21.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10420072
+  },
+  {
+   "id": 100074,
+   "title": "Pretender",
+   "title_ja": "Pretender",
+   "jacket": "jkt_004_100074",
+   "composer": "藤原 聡",
+   "lyricist": "藤原 聡",
+   "arranger": "石倉まろ",
+   "band_ids": [
+    4
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 22,
+     "display": 22.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10420074
+  },
+  {
+   "id": 100075,
+   "title": "unravel",
+   "title_ja": "unravel",
+   "jacket": "jkt_004_100075",
+   "composer": "TK",
+   "lyricist": "TK",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    4
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10420075
+  },
+  {
+   "id": 100076,
+   "title": "ロウワー",
+   "title_ja": "ロウワー",
+   "jacket": "jkt_004_100076",
+   "composer": "ぬゆり",
+   "lyricist": "ぬゆり",
+   "arranger": "太田雄大",
+   "band_ids": [
+    4
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.3
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10420076
+  },
+  {
+   "id": 100080,
+   "title": "Homie’s Tie!!",
+   "title_ja": "ホーミー・タイッ！！",
+   "jacket": "jkt_005_100080",
+   "composer": "藤井健太郎",
+   "lyricist": "藤井健太郎",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    5
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 22,
+     "display": 22.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10510080
+  },
+  {
+   "id": 100081,
+   "title": "ジャイアント・キラー・チューン",
+   "title_ja": "ジャイアント・キラー・チューン",
+   "jacket": "jkt_005_100081",
+   "composer": "藤井健太郎",
+   "lyricist": "藤井健太郎",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    5
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10510081
+  },
+  {
+   "id": 100082,
+   "title": "Peaceful Pieces!",
+   "title_ja": "ピースフル・ピーシーズ！",
+   "jacket": "jkt_005_100082",
+   "composer": "藤井健太郎",
+   "lyricist": "藤井健太郎",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    5
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.9
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10510082
+  },
+  {
+   "id": 100083,
+   "title": "Mela!",
+   "title_ja": "Mela!",
+   "jacket": "jkt_005_100083",
+   "composer": "peppe／穴見　真吾",
+   "lyricist": "長屋 晴子／小林 壱誓",
+   "arranger": "石倉まろ",
+   "band_ids": [
+    5
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10520083
+  },
+  {
+   "id": 100085,
+   "title": "サムライハート(Some Like It Hot!!)",
+   "title_ja": "サムライハート(Some Like It Hot!!)",
+   "jacket": "jkt_005_100085",
+   "composer": "UZ",
+   "lyricist": "MOMIKEN",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    5
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10520085
+  },
+  {
+   "id": 100087,
+   "title": "イケナイ太陽",
+   "title_ja": "イケナイ太陽",
+   "jacket": "jkt_005_100087",
+   "composer": "ORANGE RANGE",
+   "lyricist": "ORANGE RANGE",
+   "arranger": "藤井健太郎",
+   "band_ids": [
+    5
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 21,
+     "display": 21.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10520087
+  },
+  {
+   "id": 100088,
+   "title": "革命道中",
+   "title_ja": "革命道中",
+   "jacket": "jkt_005_100088",
+   "composer": "アイナ・ジ・エンド、Shin Sakiura",
+   "lyricist": "アイナ・ジ・エンド、Shin Sakiura",
+   "arranger": "牧野太洋",
+   "band_ids": [
+    5
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 23,
+     "display": 23.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10520088
+  },
+  {
+   "id": 100091,
+   "title": "春日影",
+   "title_ja": "春日影",
+   "jacket": "jkt_100_100091",
+   "composer": "藤田淳平（Elements Garden）",
+   "lyricist": "織田あすか（Elements Garden）",
+   "arranger": "藤田淳平（Elements Garden）",
+   "band_ids": [],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 16,
+     "display": 16.0
+    },
+    "expert": {
+     "level": 22,
+     "display": 22.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    },
+    {
+     "id": 4,
+     "name": "長崎爽世"
+    },
+    {
+     "id": 5,
+     "name": "椎名立希"
+    },
+    {
+     "id": 7,
+     "name": "Mortis / 若葉睦"
+    },
+    {
+     "id": 10,
+     "name": "Oblivionis / 豐川祥子"
+    }
+   ],
+   "sort_order": 20100091
+  },
+  {
+   "id": 100092,
+   "title": "in your blue eyes",
+   "title_ja": "碧い瞳の中に",
+   "jacket": "jkt_002_100092",
+   "composer": "Diggy-MO’、松坂康司(SUPA LOVE)",
+   "lyricist": "Diggy-MO’",
+   "arranger": "Diggy-MO’、松坂康司(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 15,
+     "display": 15.0
+    },
+    "expert": {
+     "level": 21,
+     "display": 21.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210092
+  },
+  {
+   "id": 100093,
+   "title": "往欄印",
+   "title_ja": "往欄印",
+   "jacket": "jkt_001_100093",
+   "composer": "長谷川大介(SUPA LOVE)",
+   "lyricist": "藤原優樹(SUPA LOVE)",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 23,
+     "display": 23.0
+    },
+    "expert": {
+     "level": 28,
+     "display": 28.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10110093
+  },
+  {
+   "id": 100094,
+   "title": "TearJerker",
+   "title_ja": "TearJerker",
+   "jacket": "jkt_003_100094",
+   "composer": "sabio",
+   "lyricist": "sabio",
+   "arranger": "sabio",
+   "band_ids": [
+    3
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310094
+  },
+  {
+   "id": 100095,
+   "title": "Face The Next",
+   "title_ja": "Face The Next",
+   "jacket": "jkt_003_100095",
+   "composer": "白神真志朗、千石由乃",
+   "lyricist": "白神真志朗、仲町阿拉蕾",
+   "arranger": "白神真志朗、千石由乃",
+   "band_ids": [
+    3
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310095
+  },
+  {
+   "id": 100096,
+   "title": "The Whole Blue World",
+   "title_ja": "The Whole Blue World",
+   "jacket": "jkt_002_100096",
+   "composer": "Diggy-MO’、植木建象",
+   "lyricist": "Diggy-MO’",
+   "arranger": "Diggy-MO’",
+   "band_ids": [
+    2
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210096
+  },
+  {
+   "id": 100097,
+   "title": "in my words",
+   "title_ja": "in my words",
+   "jacket": "jkt_003_100097",
+   "composer": "白神真志朗",
+   "lyricist": "白神真志朗",
+   "arranger": "白神真志朗",
+   "band_ids": [
+    3
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310097
+  },
+  {
+   "id": 100098,
+   "title": "愛是衝動",
+   "title_ja": "愛は衝動",
+   "jacket": "jkt_003_100098",
+   "composer": "sabio",
+   "lyricist": "sabio",
+   "arranger": "sabio",
+   "band_ids": [
+    3
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310098
+  },
+  {
+   "id": 100104,
+   "title": "微笑みの爆弾",
+   "title_ja": "微笑みの爆弾",
+   "jacket": "jkt_005_100104",
+   "composer": "馬渡松子",
+   "lyricist": "リーシャウロン",
+   "arranger": "牧野太洋",
+   "band_ids": [
+    5
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 17,
+     "display": 17.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10520104
+  },
+  {
+   "id": 100105,
+   "title": "ホワイトノイズ",
+   "title_ja": "ホワイトノイズ",
+   "jacket": "jkt_001_100105",
+   "composer": "藤原 聡",
+   "lyricist": "藤原 聡",
+   "arranger": "小木岳司",
+   "band_ids": [
+    1
+   ],
+   "music_type": 3,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 24,
+     "display": 24.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10120105
+  },
+  {
+   "id": 100106,
+   "title": "Keep on Riddim",
+   "title_ja": "Keep on Riddim",
+   "jacket": "jkt_005_100106",
+   "composer": "瀬名水紀(Dream Monster)",
+   "lyricist": "瀬名水紀(Dream Monster)",
+   "arranger": "瀬名水紀(Dream Monster)",
+   "band_ids": [
+    5
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 22,
+     "display": 22.0
+    },
+    "expert": {
+     "level": 27,
+     "display": 27.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 21,
+     "name": "須賀蕾葉"
+    }
+   ],
+   "sort_order": 10510106
+  },
+  {
+   "id": 100107,
+   "title": "Abracadabra",
+   "title_ja": "Abracadabra",
+   "jacket": "jkt_002_100107",
+   "composer": "Lady Gaga,Andrew Watt,Henry Russell Walter,Susan Ballion,Steven Severin,John McGeoch,Peter Edward Clarke",
+   "lyricist": "Lady Gaga,Andrew Watt,Henry Russell Walter,Susan Ballion,Steven Severin,John McGeoch,Peter Edward Clarke",
+   "arranger": "長谷川大介(SUPA LOVE)",
+   "band_ids": [
+    2
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.9
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10220107
+  },
+  {
+   "id": 100108,
+   "title": "Stellar Stellar",
+   "title_ja": "Stellar Stellar",
+   "jacket": "jkt_004_100108",
+   "composer": "TAKU INOUE",
+   "lyricist": "星街すいせい",
+   "arranger": "牧野太洋",
+   "band_ids": [
+    4
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10420108
+  },
+  {
+   "id": 100109,
+   "title": "夢我夢中",
+   "title_ja": "夢我夢中",
+   "jacket": "jkt_003_100109",
+   "composer": "ケンモチヒデフミ",
+   "lyricist": "ケンモチヒデフミ",
+   "arranger": "ケンモチヒデフミ、Skye K",
+   "band_ids": [
+    3
+   ],
+   "music_type": 2,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 11,
+     "name": "仲町阿拉蕾"
+    }
+   ],
+   "sort_order": 10310109
+  },
+  {
+   "id": 100110,
+   "title": "カーネーションの咲く日に",
+   "title_ja": "カーネーションの咲く日に",
+   "jacket": "jkt_004_100110",
+   "composer": "瀬名水紀(Dream Monster)、Aira",
+   "lyricist": "Aira",
+   "arranger": "瀬名水紀(Dream Monster)、Aira",
+   "band_ids": [
+    4
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 20,
+     "display": 20.5
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10410110
+  },
+  {
+   "id": 100111,
+   "title": "Odd Dice",
+   "title_ja": "Odd Dice",
+   "jacket": "jkt_004_100111",
+   "composer": "アザミ",
+   "lyricist": "アザミ",
+   "arranger": "アザミ",
+   "band_ids": [
+    4
+   ],
+   "music_type": 1,
+   "difficulties": {
+    "hard": {
+     "level": 22,
+     "display": 22.0
+    },
+    "expert": {
+     "level": 28,
+     "display": 28.0
+    }
+   },
+   "vocalists": [
+    {
+     "id": 16,
+     "name": "汐見螢"
+    }
+   ],
+   "sort_order": 10410111
+  },
+  {
+   "id": 100112,
+   "title": "過去を喰らう",
+   "title_ja": "過去を喰らう",
+   "jacket": "jkt_001_100112",
+   "composer": "カンザキイオリ",
+   "lyricist": "カンザキイオリ",
+   "arranger": "植木建象、神田ジョン(from PENGUIN RESEARCH)",
+   "band_ids": [
+    1
+   ],
+   "music_type": 5,
+   "difficulties": {
+    "hard": {
+     "level": 19,
+     "display": 19.0
+    },
+    "expert": {
+     "level": 25,
+     "display": 25.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 1,
+     "name": "高松燈"
+    }
+   ],
+   "sort_order": 10120112
+  },
+  {
+   "id": 100113,
+   "title": "God's Blood",
+   "title_ja": "神の名を",
+   "jacket": "jkt_002_100113",
+   "composer": "Diggy-MO’、hisakuni(SUPA LOVE)",
+   "lyricist": "Diggy-MO’",
+   "arranger": "Diggy-MO’",
+   "band_ids": [
+    2
+   ],
+   "music_type": 4,
+   "difficulties": {
+    "hard": {
+     "level": 18,
+     "display": 18.0
+    },
+    "expert": {
+     "level": 26,
+     "display": 26.5
+    }
+   },
+   "vocalists": [
+    {
+     "id": 6,
+     "name": "Doloris / 三角初華"
+    }
+   ],
+   "sort_order": 10210113
+  }
+ ],
+ "cards": [
+  {
+   "asset_id": 26,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 1,
+   "character_name": "高松燈",
+   "subtitle": "想留下的詩篇，直達心底",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 27,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 2,
+   "character_name": "千早愛音",
+   "subtitle": "閃耀的舞台",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 28,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 3,
+   "character_name": "要樂奈",
+   "subtitle": "有趣的聲音",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 29,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 4,
+   "character_name": "長崎爽世",
+   "subtitle": "交疊的光彩",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 30,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 5,
+   "character_name": "椎名立希",
+   "subtitle": "專一的律動",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 31,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 6,
+   "character_name": "Doloris / 三角初華",
+   "subtitle": "即使背負著謊言",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 32,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 7,
+   "character_name": "Mortis / 若葉睦",
+   "subtitle": "靜靜演奏",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 33,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 8,
+   "character_name": "Timoris / 八幡海鈴",
+   "subtitle": "堅若磐石的低音",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 34,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 9,
+   "character_name": "Amoris / 祐天寺若麥",
+   "subtitle": "不屈的轟鳴節奏",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 35,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 10,
+   "character_name": "Oblivionis / 豐川祥子",
+   "subtitle": "宣告福音的眼神",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 36,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 11,
+   "character_name": "仲町阿拉蕾",
+   "subtitle": "想要傳遞這份喜歡的心情！",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 37,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 12,
+   "character_name": "宮永野乃花",
+   "subtitle": "一起歡笑吧～！",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 38,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 13,
+   "character_name": "峰月律",
+   "subtitle": "串聯音符，無盡延伸",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 39,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 14,
+   "character_name": "藤都子",
+   "subtitle": "描繪音色，微微一笑",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 40,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 15,
+   "character_name": "千石由乃",
+   "subtitle": "仰望天空的律動",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 41,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 16,
+   "character_name": "汐見螢",
+   "subtitle": "通往幸福的指引之歌",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 42,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 17,
+   "character_name": "伊澤棗",
+   "subtitle": "挑戰光芒的六弦",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 43,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 18,
+   "character_name": "琴平凪",
+   "subtitle": "順其自然，編織樂音",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 44,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 19,
+   "character_name": "濱崎茉幌",
+   "subtitle": "因為想守護這個樂音",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 45,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 20,
+   "character_name": "和泉朋花",
+   "subtitle": "沉醉於光輝之中",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 46,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 21,
+   "character_name": "須賀蕾葉",
+   "subtitle": "上吧，My Family！！",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 47,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 22,
+   "character_name": "馬橋心玖",
+   "subtitle": "掩飾不住的悸動",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 48,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 23,
+   "character_name": "矢倉蓬咲",
+   "subtitle": "奏響內心的一絲勇氣",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 49,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 24,
+   "character_name": "梅里千櫻梨",
+   "subtitle": "在熱烈歡呼聲的正中央！！",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 50,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 25,
+   "character_name": "四宮寧月",
+   "subtitle": "前往未知的世界",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 51,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 1,
+   "character_name": "高松燈",
+   "subtitle": "朝著流星吶喊",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 52,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 2,
+   "character_name": "千早愛音",
+   "subtitle": "RESTART MELODY♪",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 53,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 3,
+   "character_name": "要樂奈",
+   "subtitle": "雨後天晴，指動琴鳴",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 54,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 4,
+   "character_name": "長崎爽世",
+   "subtitle": "編織於晚霞的軌跡",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 55,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 5,
+   "character_name": "椎名立希",
+   "subtitle": "想要守護的心跳",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 56,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 6,
+   "character_name": "Doloris / 三角初華",
+   "subtitle": "讓思念迴響於剎那間",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 57,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 7,
+   "character_name": "Mortis / 若葉睦",
+   "subtitle": "指尖回應的旋律",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 58,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 8,
+   "character_name": "Timoris / 八幡海鈴",
+   "subtitle": "背負在身的心願",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 59,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 9,
+   "character_name": "Amoris / 祐天寺若麥",
+   "subtitle": "魅惑的閃耀節奏",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 60,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 10,
+   "character_name": "Oblivionis / 豐川祥子",
+   "subtitle": "君臨樂園的女神",
+   "start_at": "2026-01-01 0:00:00"
+  },
+  {
+   "asset_id": 61,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 15,
+   "character_name": "千石由乃",
+   "subtitle": "Heart·Reboot",
+   "start_at": "2026-09-30 18:00:00"
+  },
+  {
+   "asset_id": 62,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 12,
+   "character_name": "宮永野乃花",
+   "subtitle": "Cute·Float",
+   "start_at": "2026-09-30 18:00:00"
+  },
+  {
+   "asset_id": 63,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 13,
+   "character_name": "峰月律",
+   "subtitle": "Night·Flight",
+   "start_at": "2026-09-30 18:00:00"
+  },
+  {
+   "asset_id": 64,
+   "rarity": 20,
+   "rarity_name": "BD",
+   "character_id": 22,
+   "character_name": "馬橋心玖",
+   "subtitle": "Happy Birthday 26-27",
+   "start_at": "2026-10-04 0:00:00"
+  },
+  {
+   "asset_id": 65,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 18,
+   "character_name": "琴平凪",
+   "subtitle": "劃破黎明",
+   "start_at": "2026-10-09 15:00:00"
+  },
+  {
+   "asset_id": 66,
+   "rarity": 4,
+   "rarity_name": "SSR",
+   "character_id": 17,
+   "character_name": "伊澤棗",
+   "subtitle": "立於光芒下",
+   "start_at": "2026-10-09 15:00:00"
+  },
+  {
+   "asset_id": 67,
+   "rarity": 3,
+   "rarity_name": "SR",
+   "character_id": 20,
+   "character_name": "和泉朋花",
+   "subtitle": "微笑，隱於幽暗",
+   "start_at": "2026-10-09 15:00:00"
+  }
+ ]
+}

@@ -1,0 +1,2384 @@
+import os
+import base64
+import random
+import secrets
+import shutil
+import sqlite3
+import threading
+import io
+import urllib.request
+import urllib.error
+from PIL import Image
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.star import Context, Star, register
+from astrbot.api import logger
+from astrbot.api import AstrBotConfig
+import astrbot.api.message_components as Comp
+import jinja2
+import json
+from datetime import datetime, timedelta
+from pathlib import Path
+
+# OurNotes（梦限大/Mill Sage/MyGO/Ave Mujica）难度体系：最高 HARD（黄）与 EX（红），无 MASTER / APPEND
+DIFFICULTY_ORDER = {'hard': 0, 'expert': 1}
+DIFFICULTY_LABEL_MAP = {'hard': 'HARD', 'expert': 'EXPERT'}
+
+# bdon.moe 资产站点（繁中服 hk-tw 资源）
+ASSET_BASE = "https://assets.bdon.moe/zh-Hans"
+ASSET_LANG_PATH = "zh-Hans"
+
+# masterdata 同步源（只取繁中服 hk-tw-mo 目录）
+MASTERDATA_REPO = "StarMoe-org/moenotes-masterdata"
+MASTERDATA_BRANCH = "main"
+MASTERDATA_PATH = "hk-tw-mo"
+MASTERDATA_FILES = [
+    "MasterText.json",
+    "MasterLiveMusic.json",
+    "MasterLiveMusicScore.json",
+    "MasterMemberCard.json",
+    "MasterCharacter.json",
+    "MasterBand.json",
+]
+
+RARITY_NAME = {2: 'R', 3: 'SR', 4: 'SSR', 20: 'BD'}
+
+
+def _secure_random_choice(items):
+    """使用加密级随机数生成器进行公平选择"""
+    if not items:
+        return None
+    secure_index = secrets.randbelow(len(items))
+    return items[secure_index]
+
+
+def select_song_with_difficulty(songs, first_difficulty_type=None, first_difficulty_level=None):
+    """
+    根据难度相似性选择歌曲，使用加密级随机数保证公平性
+    相似性标准:
+      - 同难度类型: ±5
+      - 相邻难度类型: ±7
+      - 非相邻难度类型: 不视为相似
+
+    返回的两首歌都带上最终用于展示的难度（difficulty_type / difficulty_level），
+    第二首展示的难度就是参与相似度比较的那个难度，避免"选的时候相似、显示的时候不相似"。
+    """
+    if not songs:
+        return []
+
+    first_song = _secure_random_choice(songs)
+    if first_song is None:
+        return []
+
+    first_diff_info = _extract_best_difficulty(first_song)
+    if first_diff_info:
+        first_difficulty_type = first_diff_info['type']
+        first_difficulty_level = first_diff_info['level']
+
+    similar = _find_similar_songs(songs, first_difficulty_type, first_difficulty_level, exclude_ids=[first_song.get('id')])
+
+    if similar:
+        second_song, second_diff_info = _secure_random_choice(similar)
+    else:
+        logger.warning(f"⚠️ 未找到与难度 {first_difficulty_type}{first_difficulty_level} 相似的歌曲，随机选择")
+        candidates = [s for s in songs if s.get('id') != first_song.get('id')]
+        if candidates:
+            second_song = _secure_random_choice(candidates)
+            second_diff_info = _extract_best_difficulty(second_song)
+        else:
+            second_song = first_song
+            second_diff_info = first_diff_info
+
+    result = []
+    for song, diff_info in [(first_song, first_diff_info), (second_song, second_diff_info)]:
+        song_copy = dict(song)
+        if diff_info:
+            song_copy['difficulty_type'] = diff_info['type']
+            song_copy['difficulty_level'] = diff_info['level']
+            song_copy['difficulty_label'] = DIFFICULTY_LABEL_MAP.get(diff_info['type'], diff_info['type'].capitalize())
+        else:
+            song_copy['difficulty_type'] = None
+            song_copy['difficulty_level'] = None
+            song_copy['difficulty_label'] = None
+        result.append(song_copy)
+
+    return result
+
+
+def _extract_best_difficulty(song):
+    """从歌曲中提取一个难度信息（hard / expert 之间随机，保证两种难度都有机会显示）"""
+    difficulties = song.get('difficulties', {})
+    if not difficulties:
+        return None
+
+    available = []
+    for diff_type in ('hard', 'expert'):
+        entry = difficulties.get(diff_type)
+        if entry and entry.get('display'):
+            available.append({'type': diff_type, 'level': entry['display']})
+
+    if not available:
+        return None
+    return _secure_random_choice(available)
+
+
+def _find_similar_songs(songs, difficulty_type, difficulty_level, exclude_ids=None):
+    """查找与指定难度相似的歌曲，返回 (歌曲, 参与匹配的那个难度) 列表
+
+    同难度类型阈值 ±5，跨难度类型阈值 ±7；只比较数字难度值。
+    同时带回匹配到的难度，调用方可以直接用它展示，无需再随机抽一次。
+    """
+    if exclude_ids is None:
+        exclude_ids = []
+
+    if difficulty_level is None:
+        return [(s, _extract_best_difficulty(s)) for s in songs if s.get('id') not in exclude_ids]
+
+    similar = []
+    same_type_threshold = 5
+    cross_type_threshold = 7
+
+    for song in songs:
+        song_id = song.get('id')
+        if song_id in exclude_ids:
+            continue
+
+        difficulties = song.get('difficulties', {})
+        if not difficulties:
+            continue
+
+        for diff_type, entry in difficulties.items():
+            diff_level = entry.get('display', 0)
+            level_diff = abs(diff_level - difficulty_level)
+
+            threshold = same_type_threshold if diff_type == difficulty_type else cross_type_threshold
+            if level_diff <= threshold:
+                similar.append((song, {'type': diff_type, 'level': diff_level}))
+                break
+
+    return similar
+
+
+TMPL = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=2400, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>签到成功</title>
+    <style>
+        @font-face {
+            font-family: 'MiSans';
+            src: url(data:font/ttf;base64,{{base64_font}}) format('truetype');
+            font-weight: 500;
+            font-style: normal;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'MiSans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+        }
+
+        body {
+            height: 2160px;
+            width: 2400px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 60px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .bg-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url('{{b64bg}}');
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-size: cover;
+            z-index: 0;
+        }
+
+        /* 立绘层：铺满画布，置于左侧面板之下 */
+        .character-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .character-layer img {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            height: 100%;
+            width: auto;
+            max-width: 62%;
+            object-fit: contain;
+            object-position: right bottom;
+            filter: drop-shadow(0 12px 28px rgba(0,0,0,0.35));
+        }
+
+        .main-wrapper {
+            display: flex;
+            gap: 40px;
+            width: 100%;
+            max-width: 2280px;
+            height: calc(2160px - 120px);
+            align-items: stretch;
+            position: relative;
+            z-index: 2;
+        }
+
+        .divider {
+            width: 4px;
+            background: linear-gradient(180deg,
+                rgba(255,255,255,0) 0%,
+                rgba(255,255,255,0.7) 15%,
+                rgba(255,255,255,0.7) 85%,
+                rgba(255,255,255,0) 100%);
+            border-radius: 2px;
+            box-shadow: 0 0 30px rgba(255,255,255,0.4);
+            flex-shrink: 0;
+        }
+
+        .left-panel {
+            flex: 0 0 880px;
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(28px);
+            -webkit-backdrop-filter: blur(28px);
+            border-radius: 52px;
+            padding: 52px 42px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-self: center;
+        }
+
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: flex-end;
+            min-width: 0;
+        }
+
+        .card-info {
+            background: rgba(20, 20, 30, 0.42);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border-radius: 28px;
+            padding: 26px 34px;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+            max-width: 760px;
+            margin-bottom: 12px;
+            text-align: left;
+        }
+
+        .card-rarity-row {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            margin-bottom: 14px;
+        }
+
+        .card-rarity-badge {
+            font-size: 34px;
+            font-weight: 900;
+            color: #1a1a1a;
+            padding: 6px 22px;
+            border-radius: 14px;
+            letter-spacing: 2px;
+            line-height: 1.2;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        }
+
+        .card-rarity-badge.sr {
+            background: linear-gradient(135deg, #f7d774, #d9a93c);
+        }
+
+        .card-rarity-badge.ssr {
+            background: linear-gradient(135deg, #ffe9a8, #f5c542 45%, #c99a2e);
+            box-shadow: 0 4px 18px rgba(245, 197, 66, 0.45);
+        }
+
+        .card-rarity-badge.bd {
+            background: linear-gradient(135deg, #ffd6ec, #ff9ecb 50%, #e0569b);
+            color: #ffffff;
+            text-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        .card-character-name {
+            font-size: 44px;
+            font-weight: 800;
+            color: white;
+            text-shadow: 0 3px 14px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+            line-height: 1.2;
+        }
+
+        .card-subtitle {
+            font-size: 30px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.92);
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+            line-height: 1.35;
+            margin-top: 4px;
+        }
+
+        .success-icon {
+            width: 320px;
+            height: 320px;
+            margin: 0 auto 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: visible;
+            position: relative;
+        }
+
+        .success-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.4));
+            transform: scale(1.18);
+        }
+
+        h1 {
+            font-size: 68px;
+            font-weight: 800;
+            color: white;
+            margin-bottom: 22px;
+            text-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25);
+            letter-spacing: 2px;
+            line-height: 1.18;
+        }
+
+        .date-time {
+            font-size: 44px;
+            color: rgba(255, 255, 255, 0.95);
+            margin-bottom: 38px;
+            padding-bottom: 32px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+            font-weight: 500;
+            text-shadow: 0 2px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+            line-height: 1.4;
+        }
+
+        .fortune-box {
+            background: rgba(255, 255, 255, 0.20);
+            backdrop-filter: blur(18px);
+            border-radius: 32px;
+            padding: 0;
+            margin-bottom: 34px;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            display: flex;
+            align-items: stretch;
+            box-shadow:
+                0 10px 28px rgba(0, 0, 0, 0.22),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            overflow: hidden;
+            transition: all 0.3s ease;
+            min-height: 112px;
+        }
+
+        .fortune-level {
+            flex: 0 0 210px;
+            font-size: 68px;
+            font-weight: 800;
+            color: white;
+            text-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25);
+            line-height: 1.2;
+            padding: 26px 20px;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s ease;
+            min-height: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .fortune-description {
+            flex: 1;
+            font-size: 46px;
+            color: white;
+            text-shadow: 0 2px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+            line-height: 1.38;
+            font-weight: 600;
+            padding: 26px 24px;
+            text-align: right;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            transition: background 0.3s ease;
+            min-height: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-left: 10px;
+        }
+
+        .fortune-box.good .fortune-level,
+        .fortune-box.good .fortune-description {
+            background: rgba(74, 222, 128, 0.25);
+        }
+        .fortune-box.good {
+            border-color: rgba(74, 222, 128, 0.5);
+        }
+
+        .fortune-box.bad .fortune-level,
+        .fortune-box.bad .fortune-description {
+            background: rgba(239, 68, 68, 0.28);
+        }
+        .fortune-box.bad {
+            border-color: rgba(239, 68, 68, 0.55);
+        }
+
+        .fortune-box.neutral .fortune-level,
+        .fortune-box.neutral .fortune-description {
+            background: rgba(255, 193, 7, 0.25);
+        }
+        .fortune-box.neutral {
+            border-color: rgba(255, 193, 7, 0.5);
+        }
+
+        .fortune {
+            display: flex;
+            justify-content: space-around;
+            gap: 22px;
+            margin-bottom: 36px;
+            position: relative;
+        }
+
+        .fortune-item {
+            flex: 1;
+            padding: 44px 24px;
+            border-radius: 32px;
+            backdrop-filter: blur(22px);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 18px;
+            overflow: visible;
+            position: relative;
+            box-shadow:
+                0 8px 24px rgba(0, 0, 0, 0.18),
+                inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+
+        .fortune-item.good {
+            background: rgba(74, 222, 128, 0.35);
+            border-color: rgba(74, 222, 128, 0.55);
+        }
+
+        .fortune-item.bad {
+            background: rgba(239, 68, 68, 0.35);
+            border-color: rgba(239, 68, 68, 0.55);
+        }
+
+        .fortune-icon {
+            width: 180px;
+            height: 180px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: visible;
+            position: relative;
+        }
+
+        .fortune-icon img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 6px 14px rgba(0,0,0,0.35));
+            transform: scale(1.28);
+        }
+
+        .fortune-label {
+            font-size: 40px;
+            color: rgba(255, 255, 255, 0.95);
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            text-shadow: 0 2px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .fortune-value {
+            font-size: 50px;
+            color: white;
+            font-weight: 800;
+            text-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.25);
+            line-height: 1.32;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* 左侧歌曲推荐样式 */
+        .song-section {
+            margin-top: 24px;
+            padding: 22px;
+            background: rgba(255, 255, 255, 0.18);
+            backdrop-filter: blur(16px);
+            border-radius: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow:
+                0 8px 24px rgba(0, 0, 0, 0.18),
+                inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+
+        .song-section-title {
+            font-size: 34px;
+            font-weight: 700;
+            color: white;
+            text-shadow: 0 2px 12px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+            margin-bottom: 16px;
+            letter-spacing: 2px;
+            text-align: left;
+        }
+
+        .song-info-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 16px 20px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            position: relative;
+        }
+
+        .song-info-second {
+            margin-top: 14px;
+        }
+
+        .song-cover-left {
+            width: 120px;
+            height: 120px;
+            border-radius: 20px;
+            object-fit: cover;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42);
+            flex-shrink: 0;
+        }
+
+        .song-details-left {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            text-align: left;
+            padding-right: 115px;
+        }
+
+        .song-difficulty-badge {
+            position: absolute;
+            right: 18px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 100px;
+            height: 100px;
+            border-radius: 18px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+
+        .song-difficulty-badge.hard {
+            background: rgba(255, 193, 7, 0.35);
+            border: 1px solid rgba(255, 193, 7, 0.6);
+        }
+
+        .song-difficulty-badge.expert {
+            background: linear-gradient(135deg, rgba(244, 67, 54, 0.35), rgba(233, 30, 99, 0.35));
+            border: 1px solid rgba(244, 67, 54, 0.55);
+        }
+
+        .difficulty-label {
+            font-size: 20px;
+            font-weight: 800;
+            color: white;
+            text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+            line-height: 1;
+            letter-spacing: 0.5px;
+        }
+
+        .difficulty-value {
+            font-size: 38px;
+            font-weight: 900;
+            color: white;
+            text-shadow: 0 3px 8px rgba(0, 0, 0, 0.6), 0 1px 4px rgba(0, 0, 0, 0.5);
+            line-height: 1;
+            letter-spacing: 1px;
+        }
+
+        .song-name-left {
+            font-size: 26px;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+            line-height: 1.3;
+        }
+
+        .song-name-cn-left {
+            font-size: 36px;
+            font-weight: 800;
+            color: white;
+            text-shadow: 0 3px 14px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.22);
+        }
+
+        .footer {
+            margin-top: auto;
+            padding-top: 26px;
+            font-size: 34px;
+            color: rgba(255, 255, 255, 0.88);
+            text-shadow: 0 3px 14px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.22);
+            font-weight: 700;
+            letter-spacing: 2.5px;
+            line-height: 1.4;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="bg-layer"></div>
+    <div class="character-layer">
+        <img src="{{b64char}}" alt="立绘" onerror="this.style.display='none'">
+    </div>
+    <div class="main-wrapper">
+        <!-- 左侧面板：原有签到内容 -->
+        <div class="left-panel">
+            <div class="success-icon">
+                <img src="{{b64ok}}" alt="成功" onerror="this.style.display='none'">
+            </div>
+
+            <h1>{{name}},签到成功!</h1>
+            <div class="date-time" id="datetime">2023年10月15日 14:30</div>
+
+            <div class="fortune-box {{fortune_color}}" id="fortuneBox">
+                <div class="fortune-level" id="fortuneLevel">{{fortune_level}}</div>
+                <div class="fortune-description" id="fortuneDesc">{{fortune_desc}}</div>
+            </div>
+
+            <div class="fortune">
+                <div class="fortune-item good">
+                    <div class="fortune-icon">
+                        <img src="{{b64yi}}" alt="宜" onerror="this.style.display='none'">
+                    </div>
+                    <div class="fortune-label">宜</div>
+                    <div class="fortune-value" id="good">{{yi_text}}</div>
+                </div>
+                <div class="fortune-item bad">
+                    <div class="fortune-icon">
+                        <img src="{{b64ji}}" alt="忌" onerror="this.style.display='none'">
+                    </div>
+                    <div class="fortune-label">忌</div>
+                    <div class="fortune-value" id="bad">{{ji_text}}</div>
+                </div>
+            </div>
+
+            {% if show_song %}
+            <!-- 今日推荐歌曲 -->
+            <div class="song-section">
+                <div class="song-section-title">🎵 今日歌曲推荐</div>
+                <div class="song-info-left">
+                    <img src="{{song_cover_base64}}" alt="封面" class="song-cover-left" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23667eea%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 font-size=%2240%22 fill=%22white%22 text-anchor=%22middle%22>🎵</text></svg>'">
+                    <div class="song-details-left">
+                        <div class="song-name-cn-left">{{song_name_cn}}</div>
+                        <div class="song-name-left">{{song_name}}</div>
+                    </div>
+                    {% if song_difficulty_type %}
+                    <div class="song-difficulty-badge {{song_difficulty_type}}">
+                        <div class="difficulty-label">{{song_difficulty_label}}</div>
+                        <div class="difficulty-value">{{song_difficulty_level}}</div>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="song-info-left song-info-second">
+                    <img src="{{song2_cover_base64}}" alt="封面" class="song-cover-left" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23667eea%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 font-size=%2240%22 fill=%22white%22 text-anchor=%22middle%22>🎵</text></svg>'">
+                    <div class="song-details-left">
+                        <div class="song-name-cn-left">{{song2_name_cn}}</div>
+                        <div class="song-name-left">{{song2_name}}</div>
+                    </div>
+                    {% if song2_difficulty_type %}
+                    <div class="song-difficulty-badge {{song2_difficulty_type}}">
+                        <div class="difficulty-label">{{song2_difficulty_label}}</div>
+                        <div class="difficulty-value">{{song2_difficulty_level}}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="footer">
+                {{footer_text}}
+            </div>
+        </div>
+        <!-- 右侧面板：卡面信息 -->
+        <div class="right-panel">
+            {% if card_character_name %}
+            <div class="card-info">
+                <div class="card-rarity-row">
+                    <div class="card-rarity-badge {{card_rarity_class}}">{{card_rarity_name}}</div>
+                    <div class="card-character-name">{{card_character_name}}</div>
+                </div>
+                {% if card_subtitle %}
+                <div class="card-subtitle">「{{card_subtitle}}」</div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function updateDateTime() {
+            const now = new Date();
+            const options = {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'Asia/Shanghai'
+            };
+            const formattedDate = now.toLocaleString('zh-CN', options);
+            document.getElementById('datetime').textContent = formattedDate;
+        }
+
+        const goodFortunes = ['追新番', '画同人', '做手书', '参加漫展', '写同人小说', '学习声优', '打游戏', '社区互助','做攻略', '参加社团', '学习绘画', '参加同人展', '分享资源', '关注公益', '练习日语', '整理收藏','看动漫', '听OST', '收集周边', '研究设定', 'cosplay', '配音练习', '剪辑AMV', '制作MAD'];
+        const badFortunes = ['沉迷抽卡', '挖坑不填', '刷无用番', '熬夜追更', '沉迷弹幕', '过度氪金', '网暴同好', '弃坑不交', '沉迷游戏','刷无意义弹幕', '过度磕CP', '沉迷虚拟恋爱', '盗版成瘾', '无节制追星', '忽视健康', '网络争吵', '囤积周边','毒唯行为', '引战', '剧透未看番', '滥用表情包', '刷存在感', '跟风黑角色'];
+
+        const fortuneData = [
+            { level: '大吉', desc: '最最顺!😎', color: 'good', weight: 5 },
+            { level: '吉', desc: '幸福像🎈一样飘起来', color: 'good', weight: 10 },
+            { level: '中吉', desc: '努力就发光😋', color: 'good', weight: 15 },
+            { level: '小吉', desc: '小小的幸运😆', color: 'good', weight: 20 },
+            { level: '半吉', desc: '明天会更开心哦😍', color: 'neutral', weight: 15 },
+            { level: '末吉', desc: '转机就在眼前😉', color: 'neutral', weight: 10 },
+            { level: '末小吉', desc: '再加把劲哦💪🏻', color: 'neutral', weight: 10 },
+            { level: '凶', desc: '困难是成长的礼物🎁', color: 'bad', weight: 8 },
+            { level: '小凶', desc: '小心点就好哦❤️', color: 'bad', weight: 7 },
+            { level: '半凶', desc: '要小心一点哦..', color: 'bad', weight: 5 },
+            { level: '末凶', desc: '要小心一点哦🥺', color: 'bad', weight: 3 },
+            { level: '大凶', desc: '要小心一点哦🥺', color: 'bad', weight: 2 }
+        ];
+
+        function weightedRandom(items) {
+            let totalWeight = 0;
+            for (let i = 0; i < items.length; i++) {
+                totalWeight += items[i].weight;
+            }
+
+            let random = Math.random() * totalWeight;
+            let currentWeight = 0;
+
+            for (let i = 0; i < items.length; i++) {
+                currentWeight += items[i].weight;
+                if (random <= currentWeight) {
+                    return items[i];
+                }
+            }
+
+            return items[items.length - 1];
+        }
+
+        function setFortune() {
+            const fortuneLevel = document.getElementById('fortuneLevel').textContent.trim();
+            const fortuneDesc = document.getElementById('fortuneDesc').textContent.trim();
+
+            if (!fortuneLevel || !fortuneDesc) {
+                const randomGood = goodFortunes[Math.floor(Math.random() * goodFortunes.length)];
+                const randomBad = badFortunes[Math.floor(Math.random() * badFortunes.length)];
+                document.getElementById('good').textContent = randomGood;
+                document.getElementById('bad').textContent = randomBad;
+
+                const selectedFortune = weightedRandom(fortuneData);
+                document.getElementById('fortuneLevel').textContent = selectedFortune.level;
+                document.getElementById('fortuneDesc').textContent = selectedFortune.desc;
+
+                const fortuneBox = document.getElementById('fortuneBox');
+                fortuneBox.className = 'fortune-box ' + selectedFortune.color;
+            }
+        }
+
+        updateDateTime();
+        setFortune();
+    </script>
+</body>
+</html>
+"""
+
+
+@register("astrbot_plugin_on_signin", "慵懒午睡", "OurNotes 风格签到插件 - 云端卡面、每日运势、歌曲推荐", "1.0.0")
+
+
+class MyPlugin(Star):
+    """OurNotes 风格签到插件 - 云端卡面、每日运势、歌曲推荐"""
+
+    ASSET_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "image/avif,image/webp,image/png,image/*,*/*;q=0.8",
+    }
+
+    def __init__(self, context: Context, config: AstrBotConfig):
+        super().__init__(context)
+        self.config = config
+
+        self.plugin_dir = Path(__file__).parent
+
+        from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+        self.data_dir = Path(get_astrbot_data_path()) / "plugin_data" / "astrbot_plugin_on_signin"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.data_file = self.data_dir / "signin_data.json"
+        self.config_file = self.data_dir / "config.json"
+        self.db_path = self.data_dir / "signin.db"
+        self.cache_dir = self.data_dir / "cache"
+        self.master_dir = self.data_dir / "masterdata"
+
+        # 本地内置数据（插件随附，用于离线兜底）
+        self.builtin_data_file = self.plugin_dir / "data" / "ournotes_data.json"
+
+        self._ensure_data_file()
+        self._load_custom_config()
+        self._load_dataset()
+
+        # 初始化SQLite数据库
+        self.db = SigninDatabase(self.db_path)
+
+        # 迁移旧数据（世界计划插件遗留）到新数据库
+        try:
+            old_data = self._load_data()
+            if old_data and isinstance(old_data, dict) and len(old_data) > 0:
+                logger.info(f"📦 检测到旧数据格式，开始迁移到SQLite数据库...")
+                self.db.migrate_from_json(old_data)
+                backup_file = self.data_file.with_suffix('.json.bak')
+                shutil.copy2(self.data_file, backup_file)
+                logger.info(f"✅ 数据迁移完成，旧文件已备份为: {backup_file.name}")
+        except Exception as e:
+            logger.warning(f"⚠️ 数据迁移失败（可忽略）: {e}")
+
+        # 启动时在后台执行一次每日清理（删除过期数据并回收空间），不阻塞加载
+        self.history_keep_days = int(self.config.get('history_keep_days', 365) or 365)
+        threading.Thread(
+            target=self.db.maybe_cleanup,
+            args=(self.history_keep_days,),
+            name="on-signin-db-startup-cleanup",
+            daemon=True
+        ).start()
+
+        # 后台执行一次 masterdata 同步（每天最多一次），并在插件启动时预热图片缓存
+        self._sync_lock = threading.Lock()
+        self._image_cache = {}
+        self._image_cache_lock = threading.Lock()
+        self._sync_state = {'last_sync': None, 'running': False}
+        self._load_sync_state()
+
+        if self.config.get('auto_sync_masterdata', True):
+            threading.Thread(
+                target=self._maybe_sync_masterdata,
+                name="on-signin-masterdata-sync",
+                daemon=True
+            ).start()
+
+        font_path = self.plugin_dir / "MiSans-Medium.ttf"
+        if font_path.exists():
+            with open(font_path, 'rb') as f:
+                self.base64_font = base64.b64encode(f.read()).decode('utf-8')
+            logger.info("✅ 成功加载 MiSans-Medium.ttf 字体")
+        else:
+            self.base64_font = ""
+            logger.warning("⚠️ 未找到 MiSans-Medium.ttf 字体文件，将使用系统默认字体")
+
+        self._load_decorations()
+        self._load_character_metadata()
+
+        logger.info(f"📝 插件配置已加载 - 签到指令: {self.config.get('sign_in_command', '签到')}")
+
+    # ------------------------------------------------------------------ #
+    # 数据加载与同步
+    # ------------------------------------------------------------------ #
+
+    def _load_dataset(self):
+        """加载 OurNotes 数据集（歌曲 / 卡面），优先使用同步后的数据，其次内置数据"""
+        self.songs = []
+        self.cards = []
+        self._cards_by_character = {}
+
+        candidates = [
+            self.data_dir / "ournotes_data.json",
+            self.builtin_data_file,
+        ]
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.songs = data.get('songs', []) or []
+                self.cards = data.get('cards', []) or []
+                self._index_cards()
+                logger.info(f"✅ 已加载 OurNotes 数据集: {len(self.songs)} 首歌曲, {len(self.cards)} 张 SR+/生日卡面 (来源: {path.name})")
+                if self.songs and self.cards:
+                    return
+            except Exception as e:
+                logger.warning(f"⚠️ 加载数据集失败 {path}: {e}")
+
+        if not self.songs:
+            logger.warning("⚠️ 未找到歌曲数据，请检查内置数据或等待 masterdata 同步")
+
+    def _index_cards(self):
+        """按角色 ID 索引卡面，便于指定角色签到"""
+        self._cards_by_character = {}
+        for card in self.cards:
+            self._cards_by_character.setdefault(card.get('character_id'), []).append(card)
+
+    def _load_sync_state(self):
+        state_file = self.master_dir / "sync_state.json"
+        try:
+            if state_file.exists():
+                with open(state_file, 'r', encoding='utf-8') as f:
+                    state = json.load(f)
+                self._sync_state['last_sync'] = state.get('last_sync')
+        except Exception:
+            pass
+
+    def _save_sync_state(self):
+        try:
+            self.master_dir.mkdir(parents=True, exist_ok=True)
+            with open(self.master_dir / "sync_state.json", 'w', encoding='utf-8') as f:
+                json.dump({'last_sync': self._sync_state.get('last_sync')}, f)
+        except Exception as e:
+            logger.warning(f"⚠️ 保存同步状态失败: {e}")
+
+    def _maybe_sync_masterdata(self):
+        """每天最多同步一次 masterdata（后台线程执行，不阻塞插件加载）"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        last = (self._sync_state.get('last_sync') or '')[:10]
+        if last == today:
+            logger.info(f"📅 masterdata 今日已同步过（{last}），跳过")
+            return
+        try:
+            if self._sync_masterdata(force=False):
+                logger.info("✅ masterdata 启动同步完成")
+        except Exception as e:
+            logger.warning(f"⚠️ masterdata 同步失败（不影响使用内置数据）: {e}")
+
+    def _sync_masterdata(self, force: bool = False) -> bool:
+        """从 GitHub 拉取繁中服（hk-tw-mo）master 文件并重建本地数据集"""
+        if self._sync_state.get('running'):
+            return False
+        with self._sync_lock:
+            if self._sync_state.get('running'):
+                return False
+            self._sync_state['running'] = True
+
+        try:
+            self.master_dir.mkdir(parents=True, exist_ok=True)
+            tables = {}
+            for filename in MASTERDATA_FILES:
+                local_path = self.master_dir / filename
+                url = f"https://api.github.com/repos/{MASTERDATA_REPO}/contents/{MASTERDATA_PATH}/{filename}?ref={MASTERDATA_BRANCH}"
+                if not force and local_path.exists():
+                    # 增量模式：已有文件直接复用，避免每天重复下载大文件
+                    try:
+                        with open(local_path, 'r', encoding='utf-8') as f:
+                            tables[filename[:-5]] = json.load(f)
+                        continue
+                    except Exception:
+                        pass
+                try:
+                    req = urllib.request.Request(url, headers={
+                        "User-Agent": "Mozilla/5.0",
+                        "Accept": "application/vnd.github.raw",
+                    })
+                    with urllib.request.urlopen(req, timeout=120) as resp:
+                        payload = resp.read()
+                    data = json.loads(payload.decode('utf-8'))
+                    with open(local_path, 'w', encoding='utf-8') as f:
+                        f.write(payload.decode('utf-8'))
+                    tables[filename[:-5]] = data
+                    logger.info(f"⬇️ 已同步 {filename} ({len(payload) // 1024} KB)")
+                except Exception as e:
+                    logger.warning(f"⚠️ 同步 {filename} 失败: {e}")
+                    if local_path.exists():
+                        try:
+                            with open(local_path, 'r', encoding='utf-8') as f:
+                                tables[filename[:-5]] = json.load(f)
+                        except Exception:
+                            pass
+
+            if not tables.get('MasterLiveMusic') or not tables.get('MasterMemberCard'):
+                logger.warning("⚠️ masterdata 不完整，跳过重建数据集")
+                return False
+
+            dataset = self._build_dataset(tables)
+            out_path = self.data_dir / "ournotes_data.json"
+            with open(out_path, 'w', encoding='utf-8') as f:
+                json.dump(dataset, f, ensure_ascii=False, indent=1)
+
+            self._sync_state['last_sync'] = datetime.now().isoformat(timespec='seconds')
+            self._save_sync_state()
+
+            # 热加载新数据集
+            self.songs = dataset.get('songs', [])
+            self.cards = dataset.get('cards', [])
+            self._index_cards()
+            logger.info(f"✅ masterdata 同步完成：{len(self.songs)} 首歌曲, {len(self.cards)} 张卡面")
+            return True
+        except Exception as e:
+            logger.error(f"❌ masterdata 同步异常: {e}")
+            return False
+        finally:
+            self._sync_state['running'] = False
+
+    def _build_dataset(self, tables: dict) -> dict:
+        """把 master 表合并为插件使用的精简数据集（歌曲名 / 难度 / 卡面）"""
+        text_table = tables.get('MasterText', {}).get('_allData', [])
+        text = {x.get('_id', ''): x for x in text_table}
+
+        def tc(key, default=''):
+            entry = text.get(key)
+            if not entry:
+                return default
+            return (entry.get('_traditionalChinese') or entry.get('_simplifiedChinese')
+                    or entry.get('_japanese') or default)
+
+        music_list = tables.get('MasterLiveMusic', {}).get('_allData', [])
+        score_list = tables.get('MasterLiveMusicScore', {}).get('_allData', [])
+        card_list = tables.get('MasterMemberCard', {}).get('_allData', [])
+        char_list = tables.get('MasterCharacter', {}).get('_allData', [])
+        band_list = tables.get('MasterBand', {}).get('_allData', [])
+
+        score = {x['_id']: x for x in score_list}
+        charmap = {c['_id']: c for c in char_list}
+        band_name = {b['_id']: tc(b['_nameTextID'], '') for b in band_list}
+
+        songs = []
+        for s in music_list:
+            hard = score.get(s.get('_hardID', 0), {})
+            expert = score.get(s.get('_expertID', 0), {})
+            vocalists = []
+            for vid in s.get('_vocalCharacterIDs', []):
+                c = charmap.get(vid)
+                if c:
+                    vocalists.append({'id': vid, 'name': tc(c['_nameTextID'], '')})
+            songs.append({
+                'id': s['_id'],
+                'title': tc(s['_titleTextID'], ''),
+                'title_ja': text.get(s['_titleTextID'], {}).get('_japanese', ''),
+                'jacket': s.get('_jacketAssetName', ''),
+                'composer': tc(s['_composerTextID'], ''),
+                'lyricist': tc(s['_lyricistTextID'], ''),
+                'arranger': tc(s['_arrangerTextID'], ''),
+                'band_ids': s.get('_bandIDs', []),
+                'band_names': [band_name.get(b, '') for b in s.get('_bandIDs', [])],
+                'music_type': s.get('_musicType', 0),
+                'difficulties': {
+                    'hard': {
+                        'level': hard.get('_musicScoreLevel', 0),
+                        'display': hard.get('_musicScoreDisplayLevel', 0.0),
+                    },
+                    'expert': {
+                        'level': expert.get('_musicScoreLevel', 0),
+                        'display': expert.get('_musicScoreDisplayLevel', 0.0),
+                    },
+                },
+                'vocalists': vocalists,
+                'sort_order': s.get('_sortOrder', 0),
+            })
+
+        cards = []
+        for c in card_list:
+            rarity = c.get('_rarity', 2)
+            if rarity < 3:
+                continue  # 只要 SR 以上与生日卡面（BD）
+            ch = charmap.get(c.get('_characterID'))
+            if not ch:
+                continue
+            cards.append({
+                'asset_id': c['_assetID'],
+                'rarity': rarity,
+                'rarity_name': RARITY_NAME.get(rarity, '?'),
+                'character_id': c['_characterID'],
+                'character_name': tc(ch['_nameTextID'], ''),
+                'subtitle': tc(c['_subtitleTextID'], ''),
+                'start_at': c.get('_startAt', ''),
+            })
+
+        return {
+            'meta': {
+                'source': f"https://github.com/{MASTERDATA_REPO}/tree/{MASTERDATA_BRANCH}/{MASTERDATA_PATH}",
+                'server': 'hk-tw (繁中服)',
+                'generated_at': datetime.now().isoformat(timespec='seconds'),
+                'asset_base': ASSET_BASE,
+            },
+            'songs': songs,
+            'cards': cards,
+        }
+
+    # ------------------------------------------------------------------ #
+    # 云端资产下载与缓存
+    # ------------------------------------------------------------------ #
+
+    def _fetch_image(self, url: str, cache_key: str, ttl_hours: int = 168) -> bytes:
+        """下载图片并写入本地磁盘缓存；命中缓存直接读文件（内存零占用）"""
+        cache_path = self.cache_dir / f"{cache_key}.bin"
+        try:
+            if cache_path.exists():
+                age = datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)
+                if age < timedelta(hours=ttl_hours):
+                    return cache_path.read_bytes()
+        except Exception:
+            pass
+
+        req = urllib.request.Request(url, headers=self.ASSET_HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp = cache_path.with_suffix('.tmp')
+            tmp.write_bytes(data)
+            tmp.replace(cache_path)
+        except Exception as e:
+            logger.warning(f"⚠️ 写入图片缓存失败 {cache_key}: {e}")
+        return data
+
+    def _card_asset_url(self, asset_id: int, kind: str, ext: str = "webp") -> str:
+        return f"{ASSET_BASE}/MemberCard/{asset_id}/{kind}/{kind}.{ext}"
+
+    def _jacket_url(self, jacket_asset: str, ext: str = "webp") -> str:
+        return f"{ASSET_BASE}/Image/Jacket/{jacket_asset}/{jacket_asset}.{ext}"
+
+    def _image_to_base64(self, img_data: bytes, max_size: int = 800, quality: int = 75, fmt: str = "WEBP") -> str:
+        """将图片数据压缩后转为 base64 data URI"""
+        try:
+            img = Image.open(io.BytesIO(img_data))
+            w, h = img.size
+            if max(w, h) > max_size:
+                ratio = max_size / max(w, h)
+                new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+            if fmt == "WEBP":
+                mime, save_fmt = "image/webp", "WEBP"
+            else:
+                mime, save_fmt = "image/jpeg", "JPEG"
+            if save_fmt == "JPEG" and img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format=save_fmt, quality=quality, optimize=True)
+            return f"data:{mime};base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
+        except Exception as e:
+            logger.warning(f"图片压缩失败，使用原始数据: {e}")
+            return f"data:image/png;base64,{base64.b64encode(img_data).decode('utf-8')}"
+
+    def _get_card_images(self, asset_id: int):
+        """下载指定卡面的立绘与背景（带本地缓存），返回 base64 data URI"""
+        char_b64 = ""
+        bg_b64 = ""
+        try:
+            data = self._fetch_image(self._card_asset_url(asset_id, "member_character"), f"card_{asset_id}_char")
+            char_b64 = self._image_to_base64(data, max_size=1200, quality=82, fmt="WEBP")
+        except Exception as e:
+            logger.warning(f"⚠️ 下载立绘失败 card={asset_id}: {e}")
+
+        try:
+            data = self._fetch_image(self._card_asset_url(asset_id, "member_background"), f"card_{asset_id}_bg")
+            bg_b64 = self._image_to_base64(data, max_size=1600, quality=85, fmt="WEBP")
+        except Exception as e:
+            logger.warning(f"⚠️ 下载背景失败 card={asset_id}: {e}")
+
+        return char_b64, bg_b64
+
+    def _get_song_cover(self, jacket_asset: str) -> str:
+        """下载歌曲封面（带本地缓存）并转为 base64"""
+        if not jacket_asset:
+            return ""
+        try:
+            data = self._fetch_image(self._jacket_url(jacket_asset), f"jkt_{jacket_asset}")
+            return self._image_to_base64(data, max_size=200, quality=60, fmt="WEBP")
+        except Exception as e:
+            logger.warning(f"⚠️ 下载歌曲封面失败 {jacket_asset}: {e}")
+            return ""
+
+    # ------------------------------------------------------------------ #
+    # 角色元数据 / 别名解析
+    # ------------------------------------------------------------------ #
+
+    def _load_character_metadata(self):
+        """加载角色元数据，构建名称/别名到角色ID的映射"""
+        self.character_name_map = {}  # name -> character_id
+        self.character_alias_map = {}  # alias -> character_id
+
+        chars_file = self.plugin_dir / "characters.json"
+        if not chars_file.exists():
+            logger.warning("⚠️ 未找到 characters.json，别名搜索不可用")
+            return
+
+        try:
+            with open(chars_file, 'r', encoding='utf-8') as f:
+                characters = json.load(f)
+
+            for char in characters:
+                cid = char.get('characterId')
+                name = (char.get('name') or '').lower().strip()
+                full_name = (char.get('fullNameChinese') or '').lower().strip()
+                full_name_ja = (char.get('fullName') or '').lower().strip()
+                full_name_en = (char.get('fullNameEnglish') or '').lower().strip()
+                aliases = [a.lower().strip() for a in char.get('aliases', [])]
+
+                if name:
+                    self.character_name_map[name] = cid
+                if full_name:
+                    self.character_name_map[full_name] = cid
+                if full_name_ja:
+                    self.character_name_map[full_name_ja] = cid
+                if full_name_en:
+                    self.character_name_map[full_name_en] = cid
+                for alias in aliases:
+                    if alias:
+                        self.character_alias_map[alias] = cid
+
+            logger.info(f"✅ 已加载 {len(self.character_name_map)} 个角色名称，{len(self.character_alias_map)} 个别名")
+        except Exception as e:
+            logger.error(f"❌ 加载 characters.json 失败: {e}")
+
+    def _resolve_character(self, query: str):
+        """根据用户输入的名称或别名解析出角色ID"""
+        query = (query or '').lower().strip()
+        if not query:
+            return None
+
+        if query in self.character_name_map:
+            return self.character_name_map[query]
+
+        if query in self.character_alias_map:
+            return self.character_alias_map[query]
+
+        for alias, cid in self.character_alias_map.items():
+            if alias.startswith(query) or query in alias:
+                return cid
+
+        for name, cid in self.character_name_map.items():
+            if name.startswith(query) or query in name:
+                return cid
+
+        return None
+
+    # ------------------------------------------------------------------ #
+    # 兼容旧接口
+    # ------------------------------------------------------------------ #
+
+    def _sync_plugin_data(self):
+        """旧版插件目录数据同步（OurNotes 版已改为云端下载，无需本地 img/song 资源）"""
+        return
+
+    def _load_images_base64(self):
+        """旧版本地图片加载（OurNotes 版已改为云端下载）"""
+        return
+
+    def _load_decorations(self):
+        """加载宜/忌图标（沿用插件内置资源，缺失时留空由前端隐藏）"""
+        self.decorations = {'ok': '', 'yi': '', 'ji': ''}
+        icon_dir = self.plugin_dir / "data" / "icons"
+        mapping = {'ok': 'ok.png', 'yi': 'yi.png', 'ji': 'ji.png'}
+        for key, filename in mapping.items():
+            path = icon_dir / filename
+            if not path.exists():
+                continue
+            try:
+                with open(path, 'rb') as f:
+                    self.decorations[key] = self._image_to_base64(f.read(), max_size=300, quality=60, fmt="WEBP")
+            except Exception as e:
+                logger.warning(f"⚠️ 加载图标失败 {filename}: {e}")
+
+    # ------------------------------------------------------------------ #
+    # 配置与数据文件
+    # ------------------------------------------------------------------ #
+
+    def _ensure_data_file(self):
+        if not self.data_file.exists():
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump({}, f)
+
+    def _load_custom_config(self):
+        try:
+            if self.config_file.exists():
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    self.custom_config = json.load(f)
+                logger.info("✅ 成功加载自定义配置文件")
+            else:
+                self.custom_config = {
+                    "daily_quotes": ["每一天都是新的开始，加油！"],
+                    "song_descriptions": {}
+                }
+                logger.warning("⚠️ 未找到自定义配置文件，使用默认配置")
+        except Exception as e:
+            logger.error(f"加载自定义配置文件失败: {e}")
+            self.custom_config = {"daily_quotes": ["每一天都是新的开始，加油！"], "song_descriptions": {}}
+
+    def _load_data(self):
+        try:
+            if not self.data_file.exists():
+                return {}
+            with open(self.data_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"加载签到数据失败: {e}")
+            return {}
+
+    def _get_context_id(self, event):
+        """只使用用户ID作为上下文标识，不再区分群聊/私聊"""
+        try:
+            user_id = event.get_sender_id()
+            if user_id:
+                return f"user_{user_id}"
+            return "default_ctx"
+        except Exception as e:
+            logger.warning(f"获取上下文ID失败: {e}")
+            return "default_ctx"
+
+    # ------------------------------------------------------------------ #
+    # 随机抽取
+    # ------------------------------------------------------------------ #
+
+    def _select_random_card(self, character_id=None):
+        """从 SR+/生日卡面中随机选择一张；指定角色时只从该角色的卡面中选"""
+        if character_id is not None:
+            pool = self._cards_by_character.get(character_id, [])
+            if not pool:
+                return None
+            return _secure_random_choice(pool)
+        if not self.cards:
+            return None
+        return _secure_random_choice(self.cards)
+
+    def _get_random_song(self):
+        """使用难度相似性算法选择两首歌曲"""
+        if not self.songs:
+            return [
+                {"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
+                 "difficulty_type": None, "difficulty_level": None, "difficulty_label": None},
+                {"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
+                 "difficulty_type": None, "difficulty_level": None, "difficulty_label": None}
+            ]
+
+        selected_songs = select_song_with_difficulty(self.songs)
+
+        if len(selected_songs) < 2:
+            selected_songs = selected_songs + [selected_songs[0] if selected_songs else None] * (2 - len(selected_songs))
+
+        result = []
+        for song in selected_songs[:2]:
+            if song is None:
+                result.append({"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
+                               "difficulty_type": None, "difficulty_level": None, "difficulty_label": None})
+                continue
+
+            cover_base64 = self._get_song_cover(song.get('jacket', ''))
+
+            title = song.get('title') or song.get('title_ja') or '未知歌曲'
+            composer = song.get('composer') or ''
+
+            result.append({
+                "name": composer,
+                "name_cn": title,
+                "id": song.get('id'),
+                "cover_base64": cover_base64,
+                "difficulty_type": song.get('difficulty_type'),
+                "difficulty_level": song.get('difficulty_level'),
+                "difficulty_label": song.get('difficulty_label')
+            })
+
+        while len(result) < 2:
+            result.append({"name": "", "name_cn": "暂无歌曲", "cover_base64": "",
+                           "difficulty_type": None, "difficulty_level": None, "difficulty_label": None})
+
+        return result
+
+    # ------------------------------------------------------------------ #
+    # 运势
+    # ------------------------------------------------------------------ #
+
+    def _generate_fortune(self) -> dict:
+        fortune_data = [
+            { 'level': '大吉', 'desc': '最最顺!😎', 'color': 'good', 'weight': 5 },
+            { 'level': '吉', 'desc': '幸福像🎈一样飘起来', 'color': 'good', 'weight': 10 },
+            { 'level': '中吉', 'desc': '努力就发光😋', 'color': 'good', 'weight': 15 },
+            { 'level': '小吉', 'desc': '小小的幸运😆', 'color': 'good', 'weight': 20 },
+            { 'level': '半吉', 'desc': '明天会更开心哦😍', 'color': 'neutral', 'weight': 15 },
+            { 'level': '末吉', 'desc': '转机就在眼前😉', 'color': 'neutral', 'weight': 10 },
+            { 'level': '末小吉', 'desc': '再加把劲哦💪🏻', 'color': 'neutral', 'weight': 10 },
+            { 'level': '凶', 'desc': '困难是成长的礼物🎁', 'color': 'bad', 'weight': 8 },
+            { 'level': '小凶', 'desc': '小心点就好哦❤️', 'color': 'bad', 'weight': 7 },
+            { 'level': '半凶', 'desc': '要小心一点哦..', 'color': 'bad', 'weight': 5 },
+            { 'level': '末凶', 'desc': '要小心一点哦🥺', 'color': 'bad', 'weight': 3 },
+            { 'level': '大凶', 'desc': '要小心一点哦🥺', 'color': 'bad', 'weight': 2 }
+        ]
+        return self._weighted_random(fortune_data)
+
+    def _weighted_random(self, items) -> dict:
+        total_weight = sum(item['weight'] for item in items)
+        random_val = random.random() * total_weight
+        current_weight = 0
+        for item in items:
+            current_weight += item['weight']
+            if random_val <= current_weight:
+                return item
+        return items[-1]
+
+    def _get_yi_activity(self) -> str:
+        good_fortunes = [
+            '追新番', '画同人', '做手书', '参加漫展', '写同人小说', '学习声优', '打游戏', '社区互助',
+            '做攻略', '参加社团', '学习绘画', '参加同人展', '分享资源', '关注公益', '练习日语', '整理收藏',
+            '看动漫', '听OST', '收集周边', '研究设定', 'cosplay', '配音练习', '剪辑AMV',
+            '早起锻炼', '阅读好书', '整理房间', '学习新技能', '写日记', '拍照记录', '打歌',
+            '冲榜', '陪伴家人', '户外散步', '听音乐', '练习乐器', '烘焙甜点', '种植花草',
+            '练习书法', '拼图游戏', '整理相册', '尝试新餐厅',
+            '给好友写信', '制定计划', '跑步运动',
+            '参观博物馆', '逛书店', '手工DIY', '整理衣橱', '学习摄影',
+            '看演唱会', '参加读书会', '整理笔记',
+            '做志愿者', '学习舞蹈', '玩桌游',
+            '学习烹饪', '品咖啡', '逛花市', '看日出',
+            '整理音乐列表',
+            '写短篇小说', '学习插花', '制作手账'
+        ]
+        return random.choice(good_fortunes)
+
+    def _get_ji_activity(self) -> str:
+        bad_fortunes = [
+            '沉迷抽卡', '挖坑不填', '刷无用番', '熬夜追更', '沉迷弹幕', '过度氪金', '网暴同好', '弃坑不交', '沉迷游戏',
+            '刷无意义弹幕', '过度磕CP', '沉迷虚拟恋爱', '盗版成瘾', '无节制追星', '忽视健康', '网络争吵', '囤积周边',
+            '毒唯行为', '引战', '剧透未看番', '滥用表情包', '刷存在感', '跟风黑角色'
+        ]
+        return random.choice(bad_fortunes)
+
+    # ------------------------------------------------------------------ #
+    # 指令处理
+    # ------------------------------------------------------------------ #
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE | filter.EventMessageType.PRIVATE_MESSAGE)
+    async def set_nickname_handler(self, event: AstrMessageEvent):
+        """设置签到昵称指令"""
+        message_text = event.message_str.strip()
+        if not message_text.startswith("设置签到昵称"):
+            return
+
+        nickname = message_text[len("设置签到昵称"):].strip()
+        if not nickname:
+            yield event.plain_result("⚠️ 请提供昵称，用法：设置签到昵称 你的昵称")
+            return
+
+        user_id = event.get_sender_id()
+        if not user_id:
+            yield event.plain_result("⚠️ 无法获取用户ID，设置失败")
+            return
+
+        ctx_id = self._get_context_id(event)
+        try:
+            if self.db.set_nickname(ctx_id, user_id, nickname):
+                yield event.plain_result(f"✅ 签到昵称已设置为：{nickname}")
+            else:
+                yield event.plain_result("⚠️ 设置失败，请稍后重试")
+        except Exception as e:
+            logger.error(f"❌ 设置签到昵称失败: {e}")
+            yield event.plain_result("⚠️ 设置失败，请稍后重试")
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE | filter.EventMessageType.PRIVATE_MESSAGE)
+    async def sync_masterdata_handler(self, event: AstrMessageEvent):
+        """手动同步 masterdata 指令"""
+        message_text = event.message_str.strip()
+        if message_text not in ("同步卡面数据", "同步ournotes数据", "同步数据"):
+            return
+
+        yield event.plain_result("🔄 正在同步 OurNotes master 数据（繁中服），请稍候...")
+        try:
+            ok = await self._run_sync_in_thread(force=True)
+            if ok:
+                yield event.plain_result(f"✅ 同步完成：{len(self.songs)} 首歌曲，{len(self.cards)} 张卡面")
+            else:
+                yield event.plain_result("⚠️ 同步失败，请查看日志（将继续使用现有数据）")
+        except Exception as e:
+            logger.error(f"❌ 手动同步失败: {e}")
+            yield event.plain_result(f"⚠️ 同步失败: {e}")
+
+    async def _run_sync_in_thread(self, force: bool = False) -> bool:
+        """在线程池中执行同步，避免阻塞事件循环"""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._sync_masterdata, force)
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE | filter.EventMessageType.PRIVATE_MESSAGE)
+    async def listen_signin(self, event: AstrMessageEvent):
+        message_text = event.message_str.strip()
+        sign_in_cmd = self.config.get('sign_in_command', '签到')
+
+        is_test = message_text == "测试签到"
+        char_query = ""
+
+        if not is_test:
+            if not message_text.startswith(sign_in_cmd):
+                return
+            char_query = message_text[len(sign_in_cmd):].strip()
+
+        specified_character_id = None
+        if char_query:
+            specified_character_id = self._resolve_character(char_query)
+            if specified_character_id is not None:
+                logger.info(f"🎯 用户指定角色: {char_query} -> characterId={specified_character_id}")
+            else:
+                logger.warning(f"⚠️ 未找到角色: {char_query}，静默忽略")
+                return
+
+        user_id = event.get_sender_id()
+        user_name = event.get_sender_name()
+        ctx_id = self._get_context_id(event)
+
+        if not user_id:
+            logger.warning(f"无法获取用户ID，跳过签到")
+            return
+
+        custom_nickname = ""
+        try:
+            custom_nickname = self.db.get_nickname(ctx_id, user_id)
+        except Exception as e:
+            logger.warning(f"获取自定义昵称失败: {e}")
+
+        nickname_missing = False
+        if custom_nickname:
+            display_name = custom_nickname
+        elif user_name:
+            display_name = user_name
+        else:
+            display_name = ""
+            nickname_missing = True
+            logger.warning(f"获取用户昵称失败: user_id={user_id}")
+
+        user_name = display_name
+
+        streak_days = 1
+        signed_dates = []
+
+        if not is_test:
+            try:
+                self.db.maybe_cleanup(self.history_keep_days)
+            except Exception as e:
+                logger.warning(f"⚠️ 触发每日清理失败: {e}")
+
+            try:
+                self.db.record_checkin(ctx_id, user_id, user_name)
+            except Exception as e:
+                logger.error(f"❌ 数据库记录签到失败: {e}")
+
+            logger.info(f"用户 {user_name}({user_id}) 在 {ctx_id} 签到成功")
+        else:
+            logger.info(f"用户 {user_name}({user_id}) 在 {ctx_id} 测试签到（不记录，不使用持久化状态）")
+
+        if not is_test:
+            try:
+                user_stats = self.db.get_user_stats(ctx_id, user_id)
+                streak_days = user_stats.get('streak', 0)
+            except Exception as e:
+                logger.warning(f"从数据库获取连续签到天数失败: {e}")
+                streak_days = 1
+
+            try:
+                signed_dates = user_stats.get('signed_dates', []) if self.config.get('show_calendar', True) else []
+            except Exception as e:
+                logger.warning(f"获取签到日期失败: {e}")
+                signed_dates = []
+
+        existing_daily_state = None
+        if not is_test:
+            existing_daily_state = self.db.get_daily_state(ctx_id, user_id)
+
+        fortune_data = None
+        songs = None
+        card = None
+        yi_text = ""
+        ji_text = ""
+
+        if existing_daily_state:
+            fortune_data = {
+                'level': existing_daily_state.get('fortune_level', ''),
+                'desc': existing_daily_state.get('fortune_desc', ''),
+                'color': existing_daily_state.get('fortune_color', 'neutral')
+            }
+            yi_text = existing_daily_state.get('yi_activity', '') or self._get_yi_activity()
+            ji_text = existing_daily_state.get('ji_activity', '') or self._get_ji_activity()
+            songs = [
+                {
+                    "name": existing_daily_state.get('song1_name', ''),
+                    "name_cn": existing_daily_state.get('song1_name_cn', ''),
+                    "cover_base64": existing_daily_state.get('song1_cover_base64', ''),
+                    "difficulty_type": existing_daily_state.get('song1_difficulty_type', ''),
+                    "difficulty_level": existing_daily_state.get('song1_difficulty_level', 0),
+                    "difficulty_label": existing_daily_state.get('song1_difficulty_label', '')
+                },
+                {
+                    "name": existing_daily_state.get('song2_name', ''),
+                    "name_cn": existing_daily_state.get('song2_name_cn', ''),
+                    "cover_base64": existing_daily_state.get('song2_cover_base64', ''),
+                    "difficulty_type": existing_daily_state.get('song2_difficulty_type', ''),
+                    "difficulty_level": existing_daily_state.get('song2_difficulty_level', 0),
+                    "difficulty_label": existing_daily_state.get('song2_difficulty_label', '')
+                }
+            ]
+            card = {
+                'asset_id': existing_daily_state.get('card_asset_id', 0),
+                'rarity_name': existing_daily_state.get('card_rarity_name', ''),
+                'character_name': existing_daily_state.get('card_character_name', ''),
+                'subtitle': existing_daily_state.get('card_subtitle', ''),
+            }
+            logger.info(f"📦 使用已保存的每日签到状态: {user_name}({user_id})")
+        else:
+            fortune_data = self._generate_fortune()
+            yi_text = self._get_yi_activity()
+            ji_text = self._get_ji_activity()
+
+            try:
+                songs = self._get_random_song() if self.config.get('show_song_recommendation', True) else None
+            except Exception as e:
+                logger.warning(f"获取推荐歌曲失败: {e}")
+                songs = None
+
+            card = self._select_random_card(specified_character_id)
+            if card is None and specified_character_id is not None:
+                logger.warning(f"⚠️ 角色 {specified_character_id} 暂无可用卡面，随机选择")
+                card = self._select_random_card()
+
+        if card is None:
+            logger.error("❌ 无法选择有效卡面，请检查数据同步状态")
+            yield event.plain_result("⚠️ 签到失败：卡面数据加载异常，请联系管理员")
+            return
+
+        char_b64 = ""
+        bg_b64 = ""
+        if not is_test:
+            char_b64, bg_b64 = self._get_card_images(card['asset_id'])
+        else:
+            # 测试签到也走缓存下载，但不落库
+            char_b64, bg_b64 = self._get_card_images(card['asset_id'])
+
+        if not is_test and not existing_daily_state:
+            state_data = {
+                'fortune_level': fortune_data.get('level', '') if fortune_data else '',
+                'fortune_desc': fortune_data.get('desc', '') if fortune_data else '',
+                'fortune_color': fortune_data.get('color', 'neutral') if fortune_data else 'neutral',
+                'yi_activity': yi_text,
+                'ji_activity': ji_text,
+                'card_asset_id': card.get('asset_id', 0),
+                'card_rarity_name': card.get('rarity_name', ''),
+                'card_character_name': card.get('character_name', ''),
+                'card_subtitle': card.get('subtitle', ''),
+            }
+            if songs and len(songs) > 0:
+                state_data.update({
+                    'song1_name': songs[0].get('name', ''),
+                    'song1_name_cn': songs[0].get('name_cn', ''),
+                    'song1_cover_base64': songs[0].get('cover_base64', ''),
+                    'song1_difficulty_type': songs[0].get('difficulty_type', ''),
+                    'song1_difficulty_level': songs[0].get('difficulty_level', 0),
+                    'song1_difficulty_label': songs[0].get('difficulty_label', ''),
+                })
+            if songs and len(songs) > 1:
+                state_data.update({
+                    'song2_name': songs[1].get('name', ''),
+                    'song2_name_cn': songs[1].get('name_cn', ''),
+                    'song2_cover_base64': songs[1].get('cover_base64', ''),
+                    'song2_difficulty_type': songs[1].get('difficulty_type', ''),
+                    'song2_difficulty_level': songs[1].get('difficulty_level', 0),
+                    'song2_difficulty_label': songs[1].get('difficulty_label', ''),
+                })
+            try:
+                self.db.save_daily_state(ctx_id, user_id, user_name, state_data)
+            except Exception as e:
+                logger.error(f"❌ 保存每日签到状态失败: {e}")
+
+        ui_settings = self.config.get('ui_settings', {})
+
+        options = {
+            "quality": 30,
+            "device_scale_factor_level": "high",
+            "full_page": True,
+            "omit_background": False,
+            "type": "jpeg",
+            "viewport": {"width": 800, "height": 720}
+        }
+
+        song1 = songs[0] if songs and len(songs) >= 1 else {"name": "", "name_cn": "名称：未知歌曲", "cover_base64": "", "difficulty_type": None, "difficulty_level": None, "difficulty_label": None}
+        song2 = songs[1] if songs and len(songs) >= 2 else {"name": "", "name_cn": "名称：未知歌曲", "cover_base64": "", "difficulty_type": None, "difficulty_level": None, "difficulty_label": None}
+
+        rarity_class = {'SR': 'sr', 'SSR': 'ssr', 'BD': 'bd'}.get(card.get('rarity_name', ''), 'sr')
+
+        try:
+            render_data = {
+                "name": user_name or "用户",
+                "base64_font": getattr(self, 'base64_font', ''),
+                "b64bg": bg_b64,
+                "b64char": char_b64,
+                "b64ok": self.decorations.get('ok', ''),
+                "b64yi": self.decorations.get('yi', ''),
+                "b64ji": self.decorations.get('ji', ''),
+                "fortune_level": fortune_data.get('level', '') if fortune_data else '',
+                "fortune_desc": fortune_data.get('desc', '') if fortune_data else '',
+                "fortune_color": fortune_data.get('color', 'neutral') if fortune_data else 'neutral',
+                "yi_text": yi_text,
+                "ji_text": ji_text,
+                "streak_days": max(1, streak_days),
+                "signed_dates": signed_dates or [],
+                "song_name": song1.get("name", ""),
+                "song_name_cn": song1.get("name_cn", "名称：未知歌曲"),
+                "song_cover_base64": song1.get("cover_base64", ""),
+                "song_difficulty_type": song1.get("difficulty_type") or "",
+                "song_difficulty_level": song1.get("difficulty_level") or "",
+                "song_difficulty_label": song1.get("difficulty_label") or "",
+                "song2_name": song2.get("name", ""),
+                "song2_name_cn": song2.get("name_cn", "名称：未知歌曲"),
+                "song2_cover_base64": song2.get("cover_base64", ""),
+                "song2_difficulty_type": song2.get("difficulty_type") or "",
+                "song2_difficulty_level": song2.get("difficulty_level") or "",
+                "song2_difficulty_label": song2.get("difficulty_label") or "",
+                "show_song": bool(self.config.get('show_song_recommendation', True)),
+                "card_rarity_name": card.get('rarity_name', ''),
+                "card_rarity_class": rarity_class,
+                "card_character_name": card.get('character_name', ''),
+                "card_subtitle": card.get('subtitle', ''),
+                "footer_text": self.config.get('footer_text', 'OurNotes 签到 by 慵懒午睡 | 请勿迷信哦🥺')
+            }
+
+            url = await self.html_render(TMPL, render_data, options=options)
+
+            url = self._recompress_image_url(url, target_kb=100)
+
+            yield event.image_result(url)
+
+            if nickname_missing:
+                yield event.plain_result(
+                    "⚠️ 由于QQ官方机器人的限制，获取用户昵称失败，请使用“设置签到昵称 昵称”指令手动设置签到昵称"
+                )
+        except Exception as e:
+            error_type = type(e).__name__
+            logger.error(f"❌ 渲染签到卡片失败 [{error_type}]: {e}")
+            import traceback
+            logger.error(f"堆栈信息:\n{traceback.format_exc()}")
+            yield event.plain_result(
+                self._build_text_signin(
+                    user_name, fortune_data, yi_text, ji_text,
+                    songs, streak_days, signed_dates, card
+                )
+            )
+
+    def _build_text_signin(self, user_name, fortune_data, yi_text, ji_text,
+                           songs, streak_days, signed_dates, card):
+        """图片渲染失败时，构建文字版签到内容"""
+        lines = []
+        lines.append(f"🎉 {user_name}，签到成功！")
+
+        if fortune_data:
+            level = fortune_data.get('level', '未知')
+            desc = fortune_data.get('desc', '')
+            lines.append(f"✨ 今日运势：{level} {desc}")
+
+        if yi_text:
+            lines.append(f"✅ 宜：{yi_text}")
+        if ji_text:
+            lines.append(f"❌ 忌：{ji_text}")
+
+        if card:
+            rarity = card.get('rarity_name', '')
+            cname = card.get('character_name', '')
+            sub = card.get('subtitle', '')
+            if cname:
+                line = f"🃏 今日卡面：{rarity} {cname}"
+                if sub:
+                    line += f" 「{sub}」"
+                lines.append(line)
+
+        if songs and len(songs) > 0:
+            lines.append("🎵 今日歌曲推荐：")
+            for i, song in enumerate(songs[:2], 1):
+                name_cn = song.get('name_cn', '')
+                name = song.get('name', '')
+                diff_type = song.get('difficulty_type', '')
+                diff_level = song.get('difficulty_level', '')
+                diff_label = song.get('difficulty_label', '')
+                if name_cn or name:
+                    song_line = f"  {i}. {name_cn or name}"
+                    if diff_type and diff_level:
+                        song_line += f" [{diff_label or diff_type.upper()}{diff_level}]"
+                    lines.append(song_line)
+
+        return "\n".join(lines)
+
+    def _recompress_image_url(self, url: str, target_kb: int = 100) -> str:
+        """对渲染后的图片进行二次压缩，目标大小为 target_kb KB"""
+        try:
+            if url.startswith("data:"):
+                header, b64data = url.split(",", 1)
+                img_bytes = base64.b64decode(b64data)
+            elif os.path.exists(url):
+                with open(url, 'rb') as f:
+                    img_bytes = f.read()
+            else:
+                return url
+
+            original_kb = len(img_bytes) / 1024
+            if original_kb <= target_kb:
+                logger.info(f"📦 图片 {original_kb:.1f}KB <= 目标 {target_kb}KB，无需二次压缩")
+                return url
+
+            img = Image.open(io.BytesIO(img_bytes))
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
+
+            lo, hi = 10, 85
+            result_bytes = img_bytes
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=mid, optimize=True)
+                size_kb = buf.tell() / 1024
+                if size_kb <= target_kb:
+                    result_bytes = buf.getvalue()
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+
+            final_kb = len(result_bytes) / 1024
+            if final_kb > target_kb:
+                scale = 0.9
+                for _ in range(5):
+                    w, h = img.size
+                    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+                    resized = img.resize((new_w, new_h), Image.LANCZOS)
+                    buf = io.BytesIO()
+                    resized.save(buf, format="JPEG", quality=30, optimize=True)
+                    result_bytes = buf.getvalue()
+                    final_kb = len(result_bytes) / 1024
+                    if final_kb <= target_kb:
+                        break
+                    scale *= 0.9
+
+            final_kb = len(result_bytes) / 1024
+            logger.info(f"📦 二次压缩: {original_kb:.1f}KB -> {final_kb:.1f}KB (目标 {target_kb}KB)")
+            return f"data:image/jpeg;base64,{base64.b64encode(result_bytes).decode('utf-8')}"
+        except Exception as e:
+            logger.warning(f"二次压缩失败，使用原始图片: {e}")
+            return url
+
+    async def terminate(self):
+        if hasattr(self, 'db'):
+            try:
+                self.db.close()
+                logger.info("✅ SQLite数据库连接已关闭")
+            except Exception as e:
+                logger.warning(f"关闭数据库连接失败: {e}")
+        logger.info("OurNotes 签到插件已停止")
+
+
+class SigninDatabase:
+    """SQLite 数据库管理器 - 高性能签到数据存储"""
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+        self._local = threading.local()
+        self._lock = threading.Lock()
+        self._init_database()
+        logger.info(f"✅ SQLite 数据库初始化完成: {db_path.name}")
+
+    def _get_conn(self) -> sqlite3.Connection:
+        if not hasattr(self._local, 'conn') or self._local.conn is None:
+            self._local.conn = sqlite3.connect(
+                str(self.db_path),
+                check_same_thread=False,
+                timeout=10
+            )
+            self._local.conn.row_factory = sqlite3.Row
+            self._local.conn.execute("PRAGMA journal_mode=WAL")
+            self._local.conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn.execute("PRAGMA cache_size=-32000")
+        return self._local.conn
+
+    def _init_database(self):
+        with self._get_conn() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ctx_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    username TEXT DEFAULT '',
+                    last_checkin TEXT,
+                    total_checkins INTEGER DEFAULT 0,
+                    max_streak INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ctx_id, user_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS checkin_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_ref INTEGER NOT NULL,
+                    checkin_date TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_ref) REFERENCES users(id),
+                    UNIQUE(user_ref, checkin_date)
+                );
+
+                CREATE TABLE IF NOT EXISTS daily_signin_state (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_ref INTEGER NOT NULL,
+                    signin_date TEXT NOT NULL,
+                    fortune_level TEXT,
+                    fortune_desc TEXT,
+                    fortune_color TEXT,
+                    yi_activity TEXT,
+                    ji_activity TEXT,
+                    card_asset_id INTEGER DEFAULT 0,
+                    card_rarity_name TEXT,
+                    card_character_name TEXT,
+                    card_subtitle TEXT,
+                    song1_name TEXT,
+                    song1_name_cn TEXT,
+                    song1_cover_base64 TEXT,
+                    song1_difficulty_type TEXT,
+                    song1_difficulty_level INTEGER,
+                    song1_difficulty_label TEXT,
+                    song2_name TEXT,
+                    song2_name_cn TEXT,
+                    song2_cover_base64 TEXT,
+                    song2_difficulty_type TEXT,
+                    song2_difficulty_level INTEGER,
+                    song2_difficulty_label TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_ref) REFERENCES users(id),
+                    UNIQUE(user_ref, signin_date)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_checkin_date
+                    ON checkin_history(checkin_date);
+
+                CREATE INDEX IF NOT EXISTS idx_user_ctx
+                    ON users(ctx_id, user_id);
+
+                CREATE INDEX IF NOT EXISTS idx_daily_state_date
+                    ON daily_signin_state(user_ref, signin_date);
+
+                CREATE TABLE IF NOT EXISTS meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            """)
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN nickname TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            # 旧版（世界计划插件）daily_signin_state 没有卡面列，增量补齐
+            for column, ddl in [
+                ("card_asset_id", "INTEGER DEFAULT 0"),
+                ("card_rarity_name", "TEXT"),
+                ("card_character_name", "TEXT"),
+                ("card_subtitle", "TEXT"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE daily_signin_state ADD COLUMN {column} {ddl}")
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
+
+    def migrate_from_json(self, json_data: dict):
+        """把旧版 JSON 签到数据导入数据库。
+
+        迁移后需要重算累计次数与连续天数，否则 users 表里的计数器停留在 0。
+        """
+        for ctx_id, users in json_data.items():
+            for user_id, user_data in users.items():
+                if not isinstance(user_data, dict):
+                    continue
+
+                username = user_data.get('username', 'Unknown')
+                last_checkin = user_data.get('last_checkin')
+                history = user_data.get('checkin_history', [])
+
+                try:
+                    with self._get_conn() as conn:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO users (ctx_id, user_id, username, last_checkin) VALUES (?, ?, ?, ?)",
+                            (ctx_id, user_id, username, last_checkin)
+                        )
+                        # INSERT OR IGNORE 命中已存在行时 lastrowid 不可靠，改按 (ctx_id, user_id) 查主键
+                        row = conn.execute(
+                            "SELECT id FROM users WHERE ctx_id = ? AND user_id = ?",
+                            (ctx_id, user_id)
+                        ).fetchone()
+                        if not row:
+                            continue
+                        user_ref = row['id']
+
+                        if history and isinstance(history, list):
+                            for date_str in history:
+                                conn.execute(
+                                    "INSERT OR IGNORE INTO checkin_history (user_ref, checkin_date) VALUES (?, ?)",
+                                    (user_ref, date_str)
+                                )
+
+                        # 用迁移进来的历史重算计数器，保证统计与历史一致
+                        total = conn.execute(
+                            "SELECT COUNT(*) FROM checkin_history WHERE user_ref = ?",
+                            (user_ref,)
+                        ).fetchone()[0]
+                        conn.execute("""
+                            UPDATE users SET
+                                total_checkins = MAX(total_checkins, ?),
+                                current_streak = ?,
+                                max_streak = MAX(max_streak, ?),
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (total, self._calculate_streak(user_ref),
+                              self._calculate_max_streak(user_ref), user_ref))
+
+                        conn.commit()
+                except Exception as e:
+                    logger.warning(f"迁移数据失败: {user_id} - {e}")
+
+    def get_or_create_user(self, ctx_id: str, user_id: str, username: str = "") -> dict:
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO users (ctx_id, user_id, username) VALUES (?, ?, ?)",
+                (ctx_id, user_id, username)
+            )
+
+            row = conn.execute(
+                "SELECT * FROM users WHERE ctx_id = ? AND user_id = ?",
+                (ctx_id, user_id)
+            ).fetchone()
+
+            if row and row['username'] != username:
+                conn.execute(
+                    "UPDATE users SET username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (username, row['id'])
+                )
+                conn.commit()
+
+            return dict(row) if row else {}
+
+    def set_nickname(self, ctx_id: str, user_id: str, nickname: str) -> bool:
+        with self._get_conn() as conn:
+            user = self.get_or_create_user(ctx_id, user_id)
+            if not user:
+                return False
+            conn.execute(
+                "UPDATE users SET nickname = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (nickname, user['id'])
+            )
+            conn.commit()
+            return True
+
+    def get_nickname(self, ctx_id: str, user_id: str) -> str:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT nickname FROM users WHERE ctx_id = ? AND user_id = ?",
+                (ctx_id, user_id)
+            ).fetchone()
+            return row['nickname'] if row and row['nickname'] else ''
+
+    def record_checkin(self, ctx_id: str, user_id: str, username: str) -> bool:
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        with self._get_conn() as conn:
+            user = self.get_or_create_user(ctx_id, user_id, username)
+
+            if not user:
+                return False
+
+            existing = conn.execute(
+                "SELECT id FROM checkin_history WHERE user_ref = ? AND checkin_date = ?",
+                (user['id'], today)
+            ).fetchone()
+
+            if existing:
+                return False
+
+            conn.execute(
+                "INSERT INTO checkin_history (user_ref, checkin_date) VALUES (?, ?)",
+                (user['id'], today)
+            )
+
+            streak = self._calculate_streak(user['id'])
+            total = (user.get('total_checkins', 0) or 0) + 1
+            max_streak = self._calculate_max_streak(user['id'])
+
+            conn.execute("""
+                UPDATE users SET
+                    last_checkin = ?,
+                    total_checkins = ?,
+                    current_streak = ?,
+                    max_streak = MAX(max_streak, ?),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (today, total, streak, max_streak, user['id']))
+
+            conn.commit()
+            logger.info(f"✅ 签到记录已保存到数据库: {username}({user_id}) @ {ctx_id}")
+            return True
+
+    def _calculate_streak(self, user_id: int) -> int:
+        with self._get_conn() as conn:
+            dates = sorted([
+                r[0] for r in conn.execute(
+                    "SELECT checkin_date FROM checkin_history WHERE user_ref = ? ORDER BY checkin_date DESC LIMIT 365",
+                    (user_id,)
+                ).fetchall()
+            ], reverse=True)
+
+            if not dates:
+                return 0
+
+            streak = 0
+            today = datetime.now().date()
+
+            for i in range(len(dates)):
+                expected = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+                if expected in dates:
+                    streak += 1
+                else:
+                    break
+
+            return streak
+
+    def _calculate_max_streak(self, user_id: int) -> int:
+        with self._get_conn() as conn:
+            dates = sorted([r[0] for r in conn.execute(
+                "SELECT checkin_date FROM checkin_history WHERE user_ref = ? ORDER BY checkin_date ASC",
+                (user_id,)
+            ).fetchall()])
+
+            if not dates:
+                return 0
+
+            max_streak = 1
+            current_streak = 1
+
+            for i in range(1, len(dates)):
+                prev = datetime.strptime(dates[i-1], "%Y-%m-%d").date()
+                curr = datetime.strptime(dates[i], "%Y-%m-%d").date()
+
+                if (curr - prev).days == 1:
+                    current_streak += 1
+                    max_streak = max(max_streak, current_streak)
+                else:
+                    current_streak = 1
+
+            return max_streak
+
+    def get_user_stats(self, ctx_id: str, user_id: str) -> dict:
+        user = self.get_or_create_user(ctx_id, user_id)
+
+        if not user:
+            return {
+                'streak': 0,
+                'total': 0,
+                'max_streak': 0,
+                'signed_dates': [],
+                'is_signed_today': False
+            }
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        with self._get_conn() as conn:
+            is_signed = conn.execute(
+                "SELECT id FROM checkin_history WHERE user_ref = ? AND checkin_date = ?",
+                (user['id'], today)
+            ).fetchone() is not None
+
+            signed_dates = [
+                int(r[0].split("-")[2]) for r in conn.execute(
+                    "SELECT checkin_date FROM checkin_history WHERE user_ref = ? AND checkin_date LIKE ? ORDER BY checkin_date",
+                    (user['id'], f"{datetime.now().strftime('%Y-%m')}%")
+                ).fetchall() if r[0]
+            ]
+
+            return {
+                # record_checkin 已把当日签到计入 current_streak / total_checkins，
+                # 这里直接返回持久化值，避免二次 +1 导致连续天数与累计次数虚高
+                'streak': user.get('current_streak', 0) or 0,
+                'total': user.get('total_checkins', 0) or 0,
+                'max_streak': user.get('max_streak', 0) or 0,
+                'signed_dates': signed_dates,
+                'is_signed_today': is_signed
+            }
+
+    def save_daily_state(self, ctx_id: str, user_id: str, username: str, state_data: dict) -> bool:
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        with self._get_conn() as conn:
+            user = self.get_or_create_user(ctx_id, user_id, username)
+
+            if not user:
+                return False
+
+            conn.execute("""
+                INSERT OR REPLACE INTO daily_signin_state
+                    (user_ref, signin_date, fortune_level, fortune_desc, fortune_color,
+                     yi_activity, ji_activity,
+                     card_asset_id, card_rarity_name, card_character_name, card_subtitle,
+                     song1_name, song1_name_cn, song1_cover_base64,
+                     song1_difficulty_type, song1_difficulty_level, song1_difficulty_label,
+                     song2_name, song2_name_cn, song2_cover_base64,
+                     song2_difficulty_type, song2_difficulty_level, song2_difficulty_label,
+                     updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                user['id'], today,
+                state_data.get('fortune_level', ''),
+                state_data.get('fortune_desc', ''),
+                state_data.get('fortune_color', 'neutral'),
+                state_data.get('yi_activity', ''),
+                state_data.get('ji_activity', ''),
+                state_data.get('card_asset_id', 0),
+                state_data.get('card_rarity_name', ''),
+                state_data.get('card_character_name', ''),
+                state_data.get('card_subtitle', ''),
+                state_data.get('song1_name', ''),
+                state_data.get('song1_name_cn', ''),
+                state_data.get('song1_cover_base64', ''),
+                state_data.get('song1_difficulty_type', ''),
+                state_data.get('song1_difficulty_level', 0),
+                state_data.get('song1_difficulty_label', ''),
+                state_data.get('song2_name', ''),
+                state_data.get('song2_name_cn', ''),
+                state_data.get('song2_cover_base64', ''),
+                state_data.get('song2_difficulty_type', ''),
+                state_data.get('song2_difficulty_level', 0),
+                state_data.get('song2_difficulty_label', '')
+            ))
+
+            conn.commit()
+            logger.info(f"✅ 每日签到状态已保存: {username}({user_id}) @ {ctx_id}")
+            return True
+
+    def get_daily_state(self, ctx_id: str, user_id: str) -> dict:
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        with self._get_conn() as conn:
+            user = self.get_or_create_user(ctx_id, user_id)
+
+            if not user:
+                return None
+
+            row = conn.execute(
+                "SELECT * FROM daily_signin_state WHERE user_ref = ? AND signin_date = ?",
+                (user['id'], today)
+            ).fetchone()
+
+            if not row:
+                return None
+
+            return dict(row)
+
+    def get_meta(self, key: str) -> str:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+            return row[0] if row else None
+
+    def set_meta(self, key: str, value: str):
+        with self._get_conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (key, value)
+            )
+            conn.commit()
+
+    def cleanup_old_data(self, keep_days: int = 365) -> int:
+        """删除过期的每日签到状态和签到历史，返回删除的总行数。
+
+        daily_signin_state 只在当天被读取（get_daily_state 按当天日期查询），
+        过期行是纯死数据（含大体积歌曲封面 base64），全部清除；
+        checkin_history 保留最近 keep_days 天，足够月历显示和连续签到计算。
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        history_cutoff = (datetime.now() - timedelta(days=max(1, keep_days))).strftime("%Y-%m-%d")
+
+        deleted = 0
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM daily_signin_state WHERE signin_date < ?",
+                (today,)
+            )
+            deleted += max(0, cur.rowcount)
+
+            cur = conn.execute(
+                "DELETE FROM checkin_history WHERE checkin_date < ?",
+                (history_cutoff,)
+            )
+            deleted += max(0, cur.rowcount)
+
+            conn.commit()
+        return deleted
+
+    def _vacuum_if_needed(self, min_free_pages: int = 256):
+        """在后台线程中执行：有空闲页时回收磁盘空间（256 页 ≈ 1MB）"""
+        try:
+            conn = self._get_conn()
+            free_pages = conn.execute("PRAGMA freelist_count").fetchone()[0]
+            if free_pages >= min_free_pages:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.execute("VACUUM")
+                logger.info(f"🧹 数据库空间回收完成（VACUUM 释放 {free_pages} 页）")
+        except Exception as e:
+            logger.warning(f"⚠️ 数据库空间回收失败: {e}")
+        finally:
+            self.close()
+
+    def maybe_cleanup(self, keep_days: int = 365):
+        """每天最多执行一次过期数据清理，删除后异步回收文件空间。
+
+        通过 meta 表记录上次清理日期，进程重启后不会重复执行当天的清理。
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self.get_meta('last_cleanup_date') == today:
+            return
+
+        try:
+            deleted = self.cleanup_old_data(keep_days)
+            self.set_meta('last_cleanup_date', today)
+            if deleted > 0:
+                logger.info(f"🧹 数据库每日清理完成，删除 {deleted} 条过期记录")
+            threading.Thread(
+                target=self._vacuum_if_needed,
+                name="on-signin-db-vacuum",
+                daemon=True
+            ).start()
+        except Exception as e:
+            logger.warning(f"⚠️ 数据库每日清理失败: {e}")
+
+    def close(self):
+        if hasattr(self._local, 'conn') and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None

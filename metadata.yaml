@@ -1,0 +1,7 @@
+name: astrbot_plugin_on_signin
+display_name: OurNotes签到插件
+desc: OurNotes（梦限大/Mill Sage/MyGO/Ave Mujica）风格签到打卡插件，云端卡面 + 每日运势 + 歌曲推荐
+version: v1.0.0
+author: 慵懒午睡
+repo: https://github.com/yonglanws/astrbot_plugin_on_signin
+config: true

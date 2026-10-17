@@ -1,0 +1,479 @@
+"""Standalone harness: exercises the OurNotes plugin's pure logic without AstrBot.
+
+Verifies:
+1. Difficulty model is hard/expert only (no master/append)
+2. Card pool is SR+/BD only
+3. Cloud asset URLs resolve (member_character / member_background / jacket)
+4. Daily-state round trip through SQLite
+5. Difficulty-similarity song selection
+"""
+import base64
+import io
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+import threading
+import urllib.request
+from datetime import datetime, timedelta
+from pathlib import Path
+
+PLUGIN_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PLUGIN_DIR))
+
+# Stub out astrbot before importing main.py
+import types
+
+astrbot_pkg = types.ModuleType("astrbot")
+api_pkg = types.ModuleType("astrbot.api")
+event_mod = types.ModuleType("astrbot.api.event")
+star_mod = types.ModuleType("astrbot.api.star")
+logger_mod = types.ModuleType("astrbot.api")
+comp_mod = types.ModuleType("astrbot.api.message_components")
+core_utils = types.ModuleType("astrbot.core.utils.astrbot_path")
+
+
+class _Logger:
+    def info(self, *a, **k): print("[INFO]", *a)
+    def warning(self, *a, **k): print("[WARN]", *a)
+    def error(self, *a, **k): print("[ERROR]", *a)
+
+
+class filter:
+    class EventMessageType:
+        GROUP_MESSAGE = 1
+        PRIVATE_MESSAGE = 2
+
+    @staticmethod
+    def event_message_type(*a, **k):
+        def deco(fn): return fn
+        return deco
+
+
+class AstrMessageEvent: pass
+class MessageEventResult: pass
+class Context: pass
+class Star:
+    def __init__(self, context=None): pass
+class AstrBotConfig(dict):
+    def get(self, k, d=None): return dict.get(self, k, d)
+
+
+def register(*a, **k):
+    def deco(cls): return cls
+    return deco
+
+
+event_mod.filter = filter
+event_mod.AstrMessageEvent = AstrMessageEvent
+event_mod.MessageEventResult = MessageEventResult
+star_mod.Context = Context
+star_mod.Star = Star
+star_mod.register = register
+logger_mod.logger = _Logger()
+logger_mod.AstrBotConfig = AstrBotConfig
+comp_mod.Image = object
+comp_mod.Plain = object
+core_utils.get_astrbot_data_path = lambda: tempfile.mkdtemp(prefix="on_signin_test_")
+
+astrbot_pkg.api = api_pkg
+api_pkg.event = event_mod
+api_pkg.star = star_mod
+api_pkg.logger = logger_mod.logger
+api_pkg.AstrBotConfig = AstrBotConfig
+api_pkg.message_components = comp_mod
+sys.modules["astrbot"] = astrbot_pkg
+sys.modules["astrbot.api"] = api_pkg
+sys.modules["astrbot.api.event"] = event_mod
+sys.modules["astrbot.api.star"] = star_mod
+sys.modules["astrbot.api.message_components"] = comp_mod
+sys.modules["astrbot.core"] = types.ModuleType("astrbot.core")
+sys.modules["astrbot.core.utils"] = types.ModuleType("astrbot.core.utils")
+sys.modules["astrbot.core.utils.astrbot_path"] = core_utils
+
+import main as plugin_main
+
+FAILURES = []
+PASSES = []
+
+
+def check(name, cond, detail=""):
+    if cond:
+        PASSES.append(name)
+        print(f"  ✅ {name}")
+    else:
+        FAILURES.append(f"{name}: {detail}")
+        print(f"  ❌ {name} — {detail}")
+
+
+print("=" * 70)
+print("TEST 1: Difficulty model is hard/expert only")
+print("=" * 70)
+check("DIFFICULTY_ORDER has only hard+expert",
+      set(plugin_main.DIFFICULTY_ORDER.keys()) == {"hard", "expert"},
+      str(plugin_main.DIFFICULTY_ORDER))
+check("no 'master' in difficulty order", "master" not in plugin_main.DIFFICULTY_ORDER)
+check("no 'append' in difficulty order", "append" not in plugin_main.DIFFICULTY_ORDER)
+check("labels map hard->HARD, expert->EXPERT",
+      plugin_main.DIFFICULTY_LABEL_MAP == {"hard": "HARD", "expert": "EXPERT"},
+      str(plugin_main.DIFFICULTY_LABEL_MAP))
+
+print()
+print("=" * 70)
+print("TEST 2: Dataset — songs and cards")
+print("=" * 70)
+data = json.loads((PLUGIN_DIR / "data" / "ournotes_data.json").read_text(encoding="utf-8"))
+songs = data["songs"]
+cards = data["cards"]
+check("songs non-empty", len(songs) > 0, f"{len(songs)} songs")
+check("cards non-empty", len(cards) > 0, f"{len(cards)} cards")
+check("every song has hard+expert",
+      all("hard" in s["difficulties"] and "expert" in s["difficulties"] for s in songs))
+check("every song difficulty has only hard/expert keys",
+      all(set(s["difficulties"].keys()) == {"hard", "expert"} for s in songs))
+check("no song has master/append difficulty",
+      not any("master" in s["difficulties"] or "append" in s["difficulties"] for s in songs))
+check("no R cards in pool (rarity >= 3)",
+      all(c["rarity"] >= 3 for c in cards),
+      str(sorted({c["rarity"] for c in cards})))
+check("BD card present", any(c["rarity_name"] == "BD" for c in cards))
+check("every card has asset_id", all(c.get("asset_id") for c in cards))
+check("every song has jacket", all(s.get("jacket") for s in songs))
+check("every song has title", all(s.get("title") for s in songs))
+check("every card has character_name", all(c.get("character_name") for c in cards))
+
+# 难度数值范围合理
+hs = [s["difficulties"]["hard"]["display"] for s in songs]
+es = [s["difficulties"]["expert"]["display"] for s in songs]
+check("hard levels in sane range", 5 <= min(hs) and max(hs) <= 30, f"{min(hs)}-{max(hs)}")
+check("expert levels in sane range", 5 <= min(es) and max(es) <= 30, f"{min(es)}-{max(es)}")
+check("expert >= hard for every song", all(e >= h for h, e in zip(hs, es)))
+
+print()
+print("=" * 70)
+print("TEST 3: Difficulty-similarity song selection")
+print("=" * 70)
+picked = plugin_main.select_song_with_difficulty(songs)
+check("returns 2 songs", len(picked) == 2, str(len(picked)))
+check("both picks have difficulty_type in {hard, expert}",
+      all(p["difficulty_type"] in ("hard", "expert") for p in picked),
+      str([p["difficulty_type"] for p in picked]))
+check("both picks have a numeric difficulty_level",
+      all(isinstance(p["difficulty_level"], (int, float)) for p in picked))
+check("labels are HARD/EXPERT",
+      all(p["difficulty_label"] in ("HARD", "EXPERT") for p in picked),
+      str([p["difficulty_label"] for p in picked]))
+check("picks are distinct songs", picked[0]["id"] != picked[1]["id"])
+levels = [p["difficulty_level"] for p in picked]
+check("similarity within threshold (same type ±5 / cross ±7)",
+      abs(levels[0] - levels[1]) <= 7, str(levels))
+
+# 展示的难度必须存在于该歌曲的难度表里（不能出现"选的时候相似、显示的时候不相似"）
+by_id = {s["id"]: s for s in songs}
+def displayed_difficulty_is_real(pick):
+    entry = by_id[pick["id"]]["difficulties"].get(pick["difficulty_type"])
+    return entry is not None and entry["display"] == pick["difficulty_level"]
+check("displayed difficulty exists in that song's table",
+      all(displayed_difficulty_is_real(p) for p in picked),
+      str([(p["id"], p["difficulty_type"], p["difficulty_level"]) for p in picked]))
+
+# 多次抽样：相似度约束必须始终成立（不允许出现超阈值配对）
+violations = []
+for _ in range(120):
+    pair = plugin_main.select_song_with_difficulty(songs)
+    lv = [x["difficulty_level"] for x in pair]
+    if abs(lv[0] - lv[1]) > 7:
+        violations.append(lv)
+check("120 samples all within similarity threshold", not violations, str(violations[:3]))
+
+# 两种难度都应有机会被抽到（hard 与 expert 都要能出现）
+seen_types = set()
+for _ in range(200):
+    pair = plugin_main.select_song_with_difficulty(songs)
+    for p in pair:
+        seen_types.add(p["difficulty_type"])
+check("both hard and expert appear across samples", seen_types == {"hard", "expert"}, str(seen_types))
+
+print()
+print("=" * 70)
+print("TEST 4: characters.json — OurNotes characters & aliases")
+print("=" * 70)
+chars = json.loads((PLUGIN_DIR / "characters.json").read_text(encoding="utf-8"))
+check("25 characters loaded", len(chars) == 25, str(len(chars)))
+check("every character has characterId", all(c.get("characterId") for c in chars))
+check("every character has name slug", all(c.get("name") for c in chars))
+check("every character has aliases", all(c.get("aliases") for c in chars))
+check("every character has bandName", all(c.get("bandName") for c in chars))
+# 跨游戏检查：不应再出现世界计划角色
+# 注意 shizuku 是 OurNotes 的四宮寧月（band 5），不是世界计划的日野森雫，此处不应列入
+pjsk_only = {"ick", "saki", "hnm", "shiho", "mnr", "hrk", "airi", "szk", "khn", "an", "akt", "toya",
+             "emu", "nene", "rui", "haruka", "knd", "ena", "mzk", "mfy"}
+names = {c["name"] for c in chars}
+check("no pjsk-only slugs remain", not (names & pjsk_only), str(names & pjsk_only))
+check("OurNotes shizuku is 四宮寧月 (band 5), not pjsk 日野森雫",
+      next(c for c in chars if c["name"] == "shizuku")["fullNameChinese"] == "四宮寧月")
+check("OurNotes characters present",
+      {"tomori", "anon", "rana", "soyo", "taki", "doloris", "mortis", "amoris"} <= names,
+      str(sorted(names)))
+# characters referenced by cards all exist in characters.json
+card_char_ids = {c["character_id"] for c in cards}
+char_ids = {c["characterId"] for c in chars}
+check("all card character_ids exist in characters.json", card_char_ids <= char_ids,
+      str(card_char_ids - char_ids))
+
+print()
+print("=" * 70)
+print("TEST 4b: Character alias resolution (needs _load_character_metadata called)")
+print("=" * 70)
+# 用一个真实插件实例验证 __init__ 确实调用了 _load_character_metadata
+tmp_data = Path(tempfile.mkdtemp(prefix="on_signin_inst_"))
+inst = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst.plugin_dir = PLUGIN_DIR
+inst.data_dir = tmp_data
+inst.data_file = tmp_data / "signin_data.json"
+inst.config_file = tmp_data / "config.json"
+inst.db_path = tmp_data / "signin.db"
+inst.cache_dir = tmp_data / "cache"
+inst.master_dir = tmp_data / "masterdata"
+inst.builtin_data_file = PLUGIN_DIR / "data" / "ournotes_data.json"
+inst.config = plugin_main.AstrBotConfig({"sign_in_command": "签到"})
+inst.custom_config = {}
+inst._sync_lock = threading.Lock()
+inst._image_cache = {}
+inst._image_cache_lock = threading.Lock()
+inst._sync_state = {"last_sync": None, "running": False}
+inst.db = plugin_main.SigninDatabase(inst.db_path)
+inst._load_dataset()
+inst._load_character_metadata()
+check("character_name_map populated", len(inst.character_name_map) > 0, str(len(inst.character_name_map)))
+check("character_alias_map populated", len(inst.character_alias_map) > 0, str(len(inst.character_alias_map)))
+
+# 源码层面确认 __init__ 会调用它（防止再次回归）
+src = (PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
+init_body = src[src.index("def __init__(self, context"):src.index("# 数据加载与同步")]
+check("__init__ calls _load_character_metadata", "_load_character_metadata()" in init_body)
+
+# 各种输入形式都能解析到正确角色ID
+cases = [
+    ("ena", None),          # 世界计划角色，应解析不到
+    ("tomori", 1), ("anon", 2), ("rana", 3), ("soyo", 4), ("taki", 5),
+    ("高松燈", 1), ("千早愛音", 2), ("長崎爽世", 4), ("祥子", 10), ("初華", 6),
+    ("睦", 7), ("海鈴", 8), ("にゃむ", 9), ("阿拉蕾", 11), ("野乃花", 12),
+    ("miku", 22), ("心玖", 22), ("四宮寧月", 25),
+]
+for query, expected in cases:
+    got = inst._resolve_character(query)
+    check(f"resolve {query!r} -> {expected}", got == expected, f"got {got}")
+
+# 解析出的角色必须有可用卡面
+for query in ["tomori", "anon", "rana", "soyo", "taki", "doloris", "mortis", "timoris",
+              "amoris", "oblivionis", "arale", "nonoka", "ritsu", "miyako", "yuno",
+              "hotaru", "natsume", "nagi", "mahoro", "houka", "raika", "miku",
+              "yomogi", "chieri", "shizuku"]:
+    cid = inst._resolve_character(query)
+    has_cards = bool(inst._cards_by_character.get(cid))
+    check(f"character {query} (id={cid}) has SR+/BD cards", has_cards)
+
+# 指定角色选卡只会选到该角色的卡
+for cid in list(inst._cards_by_character.keys())[:10]:
+    for _ in range(20):
+        c = inst._select_random_card(cid)
+        if c["character_id"] != cid:
+            check(f"select_random_card({cid}) stays in character", False, str(c))
+            break
+    else:
+        check(f"select_random_card({cid}) stays in character", True)
+
+# 不指定角色时只能选到 SR+ / BD
+for _ in range(100):
+    c = inst._select_random_card()
+    if c["rarity"] < 3:
+        check("random card is always SR+/BD", False, str(c))
+        break
+else:
+    check("random card is always SR+/BD", True)
+inst.db.close()
+
+print()
+print("=" * 70)
+print("TEST 4c: masterdata sync + dataset rebuild")
+print("=" * 70)
+sync_dir = Path(tempfile.mkdtemp(prefix="on_signin_sync_"))
+inst2 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst2.data_dir = sync_dir
+inst2.master_dir = sync_dir / "masterdata"
+inst2.cache_dir = sync_dir / "cache"
+inst2._sync_lock = threading.Lock()
+inst2._sync_state = {"last_sync": None, "running": False}
+inst2.songs = []
+inst2.cards = []
+
+# 用已抓取的 master 表在本地重建数据集（不打网络，验证合并逻辑）
+T = "C:/Users/21557/AppData/Local/Temp/"
+tables = {}
+for fn, key in [("mt.json", "MasterText"), ("mlm.json", "MasterLiveMusic"),
+                ("mlms.json", "MasterLiveMusicScore"), ("mmc.json", "MasterMemberCard"),
+                ("mc.json", "MasterCharacter"), ("mb2.json", "MasterBand")]:
+    p = Path(T) / fn
+    if p.exists():
+        tables[key] = json.loads(p.read_text(encoding="utf-8"))
+if len(tables) == 6:
+    ds = inst2._build_dataset(tables)
+    check("rebuilt dataset has songs", len(ds["songs"]) == len(songs), f"{len(ds['songs'])} vs {len(songs)}")
+    check("rebuilt dataset has same card count", len(ds["cards"]) == len(cards), f"{len(ds['cards'])} vs {len(cards)}")
+    check("rebuilt songs only have hard/expert",
+          all(set(s["difficulties"]) == {"hard", "expert"} for s in ds["songs"]))
+    check("rebuilt cards are all SR+/BD", all(c["rarity"] >= 3 for c in ds["cards"]))
+    check("rebuilt songs have titles", all(s["title"] for s in ds["songs"]))
+    check("rebuilt cards have character names", all(c["character_name"] for c in ds["cards"]))
+    check("rebuilt meta records source repo", "moenotes-masterdata" in ds["meta"]["source"], ds["meta"]["source"])
+    check("rebuilt meta records hk-tw-mo path", "hk-tw-mo" in ds["meta"]["source"], ds["meta"]["source"])
+else:
+    print(f"  ⏭️ 跳过（本地 master 表不完整: {sorted(tables)}）")
+
+# 空表不应崩溃
+empty = inst2._build_dataset({"MasterText": {"_allData": []}, "MasterLiveMusic": {"_allData": []},
+                              "MasterLiveMusicScore": {"_allData": []}, "MasterMemberCard": {"_allData": []},
+                              "MasterCharacter": {"_allData": []}, "MasterBand": {"_allData": []}})
+check("empty tables build empty dataset", empty["songs"] == [] and empty["cards"] == [])
+
+print()
+print("=" * 70)
+print("TEST 5: SQLite round trip (users / checkin / daily state / cleanup)")
+print("=" * 70)
+db_dir = Path(tempfile.mkdtemp(prefix="on_signin_db_"))
+db = plugin_main.SigninDatabase(db_dir / "signin.db")
+ctx = "user_test_1"
+uid = "10001"
+
+u = db.get_or_create_user(ctx, uid, "测试用户")
+check("user created", bool(u) and u["ctx_id"] == ctx, str(u))
+check("record_checkin returns True first time", db.record_checkin(ctx, uid, "测试用户") is True)
+check("record_checkin returns False on duplicate", db.record_checkin(ctx, uid, "测试用户") is False)
+stats = db.get_user_stats(ctx, uid)
+check("streak is 1 after one checkin", stats["streak"] == 1, str(stats))
+check("total is 1", stats["total"] == 1, str(stats))
+check("signed_dates contains today", datetime.now().day in stats["signed_dates"], str(stats))
+check("is_signed_today True", stats["is_signed_today"] is True)
+check("max_streak is 1", stats["max_streak"] == 1, str(stats))
+
+db.set_nickname(ctx, uid, "昵称甲")
+check("nickname round trip", db.get_nickname(ctx, uid) == "昵称甲", db.get_nickname(ctx, uid))
+
+state = {
+    "fortune_level": "大吉", "fortune_desc": "x", "fortune_color": "good",
+    "yi_activity": "打歌", "ji_activity": "熬夜",
+    "card_asset_id": 29, "card_rarity_name": "SR", "card_character_name": "長崎爽世",
+    "card_subtitle": "交疊的光彩",
+    "song1_name": " composer", "song1_name_cn": "迷星叫", "song1_cover_base64": "AAAA",
+    "song1_difficulty_type": "expert", "song1_difficulty_level": 25.0, "song1_difficulty_label": "EXPERT",
+    "song2_name": " c2", "song2_name_cn": "壹雫空", "song2_cover_base64": "BBBB",
+    "song2_difficulty_type": "hard", "song2_difficulty_level": 21.0, "song2_difficulty_label": "HARD",
+}
+check("save_daily_state ok", db.save_daily_state(ctx, uid, "测试用户", state) is True)
+got = db.get_daily_state(ctx, uid)
+check("get_daily_state returns row", got is not None)
+check("card fields round trip",
+      got and got["card_asset_id"] == 29 and got["card_rarity_name"] == "SR"
+      and got["card_character_name"] == "長崎爽世" and got["card_subtitle"] == "交疊的光彩",
+      str(got and {k: got[k] for k in ("card_asset_id", "card_rarity_name", "card_character_name", "card_subtitle")}))
+check("song difficulty round trip",
+      got and got["song1_difficulty_type"] == "expert" and got["song1_difficulty_level"] == 25.0
+      and got["song2_difficulty_type"] == "hard",
+      str(got and {k: got[k] for k in ("song1_difficulty_type", "song1_difficulty_level", "song2_difficulty_type")}))
+
+# 旧库迁移：构造一个没有卡面列的旧表，验证 ALTER 补齐
+old_db = db_dir / "old.db"
+conn = sqlite3.connect(str(old_db))
+conn.executescript("""
+CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, ctx_id TEXT, user_id TEXT, username TEXT,
+  last_checkin TEXT, total_checkins INTEGER DEFAULT 0, max_streak INTEGER DEFAULT 0,
+  current_streak INTEGER DEFAULT 0, created_at TIMESTAMP, updated_at TIMESTAMP, UNIQUE(ctx_id,user_id));
+CREATE TABLE daily_signin_state (id INTEGER PRIMARY KEY AUTOINCREMENT, user_ref INTEGER, signin_date TEXT,
+  fortune_level TEXT, fortune_desc TEXT, fortune_color TEXT, yi_activity TEXT, ji_activity TEXT,
+  song1_name TEXT, song1_name_cn TEXT, song1_cover_base64 TEXT, song1_difficulty_type TEXT,
+  song1_difficulty_level INTEGER, song1_difficulty_label TEXT, song2_name TEXT, song2_name_cn TEXT,
+  song2_cover_base64 TEXT, song2_difficulty_type TEXT, song2_difficulty_level INTEGER,
+  song2_difficulty_label TEXT, created_at TIMESTAMP, updated_at TIMESTAMP, UNIQUE(user_ref,signin_date));
+""")
+conn.commit(); conn.close()
+old = plugin_main.SigninDatabase(old_db)
+cols = {r[1] for r in old._get_conn().execute("PRAGMA table_info(daily_signin_state)").fetchall()}
+check("legacy daily_signin_state gained card columns",
+      {"card_asset_id", "card_rarity_name", "card_character_name", "card_subtitle"} <= cols,
+      str(sorted(cols)))
+
+db.migrate_from_json({"user_old": {"20001": {"username": "旧用户", "last_checkin": "2026-01-01",
+                                            "checkin_history": ["2026-01-01", "2026-01-02"]}}})
+migrated = db.get_user_stats("user_old", "20001")
+check("json migration imported history", migrated["total"] == 2, str(migrated))
+
+n = db.cleanup_old_data(keep_days=365)
+check("cleanup_old_data runs", isinstance(n, int), str(n))
+db.set_meta("k", "v")
+check("meta round trip", db.get_meta("k") == "v")
+db.maybe_cleanup(365)
+db.maybe_cleanup(365)  # second call should be a no-op (same day)
+check("maybe_cleanup idempotent same day", db.get_meta("last_cleanup_date") == datetime.now().strftime("%Y-%m-%d"))
+db.close()
+old.close()
+
+print()
+print("=" * 70)
+print("TEST 6: Cloud asset URL construction")
+print("=" * 70)
+check("card character URL pattern",
+      plugin_main.MyPlugin._card_asset_url(None, 29, "member_character")
+      == "https://assets.bdon.moe/zh-Hans/MemberCard/29/member_character/member_character.webp",
+      plugin_main.MyPlugin._card_asset_url(None, 29, "member_character"))
+check("card background URL pattern",
+      plugin_main.MyPlugin._card_asset_url(None, 29, "member_background")
+      == "https://assets.bdon.moe/zh-Hans/MemberCard/29/member_background/member_background.webp")
+check("jacket URL pattern",
+      plugin_main.MyPlugin._jacket_url(None, "jkt_001_100001")
+      == "https://assets.bdon.moe/zh-Hans/Image/Jacket/jkt_001_100001/jkt_001_100001.webp")
+
+print()
+print("=" * 70)
+print("TEST 7: Live cloud asset reachability (all SR+/BD cards)")
+print("=" * 70)
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+asset_ids = sorted({c["asset_id"] for c in cards})
+bad_char, bad_bg = [], []
+for aid in asset_ids:
+    for kind, bucket in (("member_character", bad_char), ("member_background", bad_bg)):
+        url = f"https://assets.bdon.moe/zh-Hans/MemberCard/{aid}/{kind}/{kind}.webp"
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=25) as r:
+                magic = r.read(4)
+            if magic != b"RIFF":
+                bucket.append((aid, kind, "not-webp"))
+        except Exception as e:
+            bucket.append((aid, kind, repr(e)[:60]))
+check(f"all {len(asset_ids)} card 立绘 downloadable", not bad_char, str(bad_char[:5]))
+check(f"all {len(asset_ids)} card 背景 downloadable", not bad_bg, str(bad_bg[:5]))
+
+jacket_bad = []
+for s in songs[:12]:
+    url = f"https://assets.bdon.moe/zh-Hans/Image/Jacket/{s['jacket']}/{s['jacket']}.webp"
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=25) as r:
+            magic = r.read(4)
+        if magic != b"RIFF":
+            jacket_bad.append((s["jacket"], "not-webp"))
+    except Exception as e:
+        jacket_bad.append((s["jacket"], repr(e)[:60]))
+check("sampled 12 jackets downloadable", not jacket_bad, str(jacket_bad[:5]))
+
+print()
+print("=" * 70)
+print(f"RESULT: {len(PASSES)} passed, {len(FAILURES)} failed")
+print("=" * 70)
+if FAILURES:
+    for f in FAILURES:
+        print("  ❌", f)
+    sys.exit(1)
+print("ALL CHECKS PASSED")

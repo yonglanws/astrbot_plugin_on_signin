@@ -1,0 +1,470 @@
+[
+ {
+  "characterId": 1,
+  "name": "tomori",
+  "fullName": "高松 燈",
+  "fullNameChinese": "高松燈",
+  "fullNameEnglish": "Tomori Takamatsu",
+  "shortName": "燈",
+  "bandId": 1,
+  "bandName": "MyGO!!!!!",
+  "birthday": "11-22",
+  "color": "#77BBDD",
+  "aliases": [
+   "tomori",
+   "燈",
+   "高松燈"
+  ]
+ },
+ {
+  "characterId": 2,
+  "name": "anon",
+  "fullName": "千早 愛音",
+  "fullNameChinese": "千早愛音",
+  "fullNameEnglish": "Anon Chihaya",
+  "shortName": "愛音",
+  "bandId": 1,
+  "bandName": "MyGO!!!!!",
+  "birthday": "9-8",
+  "color": "#FF8899",
+  "aliases": [
+   "anon",
+   "千早愛音",
+   "愛音"
+  ]
+ },
+ {
+  "characterId": 3,
+  "name": "rana",
+  "fullName": "要 楽奈",
+  "fullNameChinese": "要樂奈",
+  "fullNameEnglish": "Rāna Kaname",
+  "shortName": "楽奈",
+  "bandId": 1,
+  "bandName": "MyGO!!!!!",
+  "birthday": "2-22",
+  "color": "#77DD77",
+  "aliases": [
+   "rana",
+   "楽奈",
+   "樂奈",
+   "要楽奈",
+   "要樂奈"
+  ]
+ },
+ {
+  "characterId": 4,
+  "name": "soyo",
+  "fullName": "長崎 そよ",
+  "fullNameChinese": "長崎爽世",
+  "fullNameEnglish": "Soyo Nagasaki",
+  "shortName": "そよ",
+  "bandId": 1,
+  "bandName": "MyGO!!!!!",
+  "birthday": "5-27",
+  "color": "#FFDD88",
+  "aliases": [
+   "soyo",
+   "そよ",
+   "爽世",
+   "長崎そよ",
+   "長崎爽世"
+  ]
+ },
+ {
+  "characterId": 5,
+  "name": "taki",
+  "fullName": "椎名 立希",
+  "fullNameChinese": "椎名立希",
+  "fullNameEnglish": "Taki Shiina",
+  "shortName": "立希",
+  "bandId": 1,
+  "bandName": "MyGO!!!!!",
+  "birthday": "8-9",
+  "color": "#7777AA",
+  "aliases": [
+   "taki",
+   "椎名立希",
+   "立希"
+  ]
+ },
+ {
+  "characterId": 6,
+  "name": "doloris",
+  "fullName": "ドロリス / 三角 初華",
+  "fullNameChinese": "Doloris / 三角初華",
+  "fullNameEnglish": "Doloris / Uika Misumi",
+  "shortName": "初華",
+  "bandId": 2,
+  "bandName": "Ave Mujica",
+  "birthday": "6-26",
+  "color": "#bb9955",
+  "aliases": [
+   "Doloris",
+   "Doloris/三角初華",
+   "doloris",
+   "ドロリス",
+   "ドロリス/三角初華",
+   "三角初華",
+   "初華"
+  ]
+ },
+ {
+  "characterId": 7,
+  "name": "mortis",
+  "fullName": "モーティス / 若葉 睦",
+  "fullNameChinese": "Mortis / 若葉睦",
+  "fullNameEnglish": "Mortis / Mutsumi Wakaba",
+  "shortName": "睦",
+  "bandId": 2,
+  "bandName": "Ave Mujica",
+  "birthday": "1-14",
+  "color": "#779977",
+  "aliases": [
+   "Mortis",
+   "Mortis/若葉睦",
+   "mortis",
+   "モーティス",
+   "モーティス/若葉睦",
+   "睦",
+   "若葉睦"
+  ]
+ },
+ {
+  "characterId": 8,
+  "name": "timoris",
+  "fullName": "ティモリス / 八幡 海鈴",
+  "fullNameChinese": "Timoris / 八幡海鈴",
+  "fullNameEnglish": "Timoris / Umiri Yahata",
+  "shortName": "海鈴",
+  "bandId": 2,
+  "bandName": "Ave Mujica",
+  "birthday": "4-7",
+  "color": "#335566",
+  "aliases": [
+   "Timoris",
+   "Timoris/八幡海鈴",
+   "timoris",
+   "ティモリス",
+   "ティモリス/八幡海鈴",
+   "八幡海鈴",
+   "海鈴"
+  ]
+ },
+ {
+  "characterId": 9,
+  "name": "amoris",
+  "fullName": "アモーリス / 祐天寺 にゃむ",
+  "fullNameChinese": "Amoris / 祐天寺若麥",
+  "fullNameEnglish": "Amoris / Nyamu Yūtenji",
+  "shortName": "にゃむ",
+  "bandId": 2,
+  "bandName": "Ave Mujica",
+  "birthday": "6-1",
+  "color": "#aa4477",
+  "aliases": [
+   "Amoris",
+   "Amoris/祐天寺若麥",
+   "amoris",
+   "にゃむ",
+   "アモーリス",
+   "アモーリス/祐天寺にゃむ",
+   "祐天寺にゃむ",
+   "祐天寺若麥",
+   "若麥"
+  ]
+ },
+ {
+  "characterId": 10,
+  "name": "oblivionis",
+  "fullName": "オブリビオニス / 豊川 祥子",
+  "fullNameChinese": "Oblivionis / 豐川祥子",
+  "fullNameEnglish": "Oblivionis / Sakiko Togawa",
+  "shortName": "祥子",
+  "bandId": 2,
+  "bandName": "Ave Mujica",
+  "birthday": "2-14",
+  "color": "#7799cc",
+  "aliases": [
+   "Oblivionis",
+   "Oblivionis/豐川祥子",
+   "oblivionis",
+   "オブリビオニス",
+   "オブリビオニス/豊川祥子",
+   "祥子",
+   "豊川祥子",
+   "豐川祥子"
+  ]
+ },
+ {
+  "characterId": 11,
+  "name": "arale",
+  "fullName": "仲町 あられ",
+  "fullNameChinese": "仲町阿拉蕾",
+  "fullNameEnglish": "Arale Nakamachi",
+  "shortName": "あられ",
+  "bandId": 3,
+  "bandName": "夢限大MewType",
+  "birthday": "8-16",
+  "color": "#FFEE55",
+  "aliases": [
+   "arale",
+   "あられ",
+   "仲町あられ",
+   "仲町阿拉蕾",
+   "阿拉蕾"
+  ]
+ },
+ {
+  "characterId": 12,
+  "name": "nonoka",
+  "fullName": "宮永 ののか",
+  "fullNameChinese": "宮永野乃花",
+  "fullNameEnglish": "Nonoka Miyanaga",
+  "shortName": "ののか",
+  "bandId": 3,
+  "bandName": "夢限大MewType",
+  "birthday": "4-17",
+  "color": "#FFBBCC",
+  "aliases": [
+   "nonoka",
+   "ののか",
+   "宮永ののか",
+   "宮永野乃花",
+   "野乃花"
+  ]
+ },
+ {
+  "characterId": 13,
+  "name": "ritsu",
+  "fullName": "峰月 律",
+  "fullNameChinese": "峰月律",
+  "fullNameEnglish": "Ritsu Minetsuki",
+  "shortName": "律",
+  "bandId": 3,
+  "bandName": "夢限大MewType",
+  "birthday": "2-7",
+  "color": "#4477CC",
+  "aliases": [
+   "ritsu",
+   "峰月律",
+   "律"
+  ]
+ },
+ {
+  "characterId": 14,
+  "name": "miyako",
+  "fullName": "藤 都子",
+  "fullNameChinese": "藤都子",
+  "fullNameEnglish": "Miyako Fuji",
+  "shortName": "都子",
+  "bandId": 3,
+  "bandName": "夢限大MewType",
+  "birthday": "9-19",
+  "color": "#9977CC",
+  "aliases": [
+   "miyako",
+   "藤都子",
+   "都子"
+  ]
+ },
+ {
+  "characterId": 15,
+  "name": "yuno",
+  "fullName": "千石 ユノ",
+  "fullNameChinese": "千石由乃",
+  "fullNameEnglish": "Yuno Sengoku",
+  "shortName": "ユノ",
+  "bandId": 3,
+  "bandName": "夢限大MewType",
+  "birthday": "11-4",
+  "color": "#EE5577",
+  "aliases": [
+   "yuno",
+   "ユノ",
+   "千石ユノ",
+   "千石由乃",
+   "由乃"
+  ]
+ },
+ {
+  "characterId": 16,
+  "name": "hotaru",
+  "fullName": "汐見 蛍",
+  "fullNameChinese": "汐見螢",
+  "fullNameEnglish": "Hotaru Shiomi",
+  "shortName": "蛍",
+  "bandId": 4,
+  "bandName": "millsage",
+  "birthday": "3-12",
+  "color": "#99FF99",
+  "aliases": [
+   "hotaru",
+   "汐見蛍",
+   "汐見螢",
+   "蛍",
+   "螢"
+  ]
+ },
+ {
+  "characterId": 17,
+  "name": "natsume",
+  "fullName": "伊沢 なつめ",
+  "fullNameChinese": "伊澤棗",
+  "fullNameEnglish": "Natsume Izawa",
+  "shortName": "なつめ",
+  "bandId": 4,
+  "bandName": "millsage",
+  "birthday": "3-30",
+  "color": "#FF4444",
+  "aliases": [
+   "natsume",
+   "なつめ",
+   "伊沢なつめ",
+   "伊澤棗",
+   "棗"
+  ]
+ },
+ {
+  "characterId": 18,
+  "name": "nagi",
+  "fullName": "琴平 凪",
+  "fullNameChinese": "琴平凪",
+  "fullNameEnglish": "Nagi Kotohira",
+  "shortName": "凪",
+  "bandId": 4,
+  "bandName": "millsage",
+  "birthday": "12-10",
+  "color": "#5555FF",
+  "aliases": [
+   "nagi",
+   "凪",
+   "琴平凪"
+  ]
+ },
+ {
+  "characterId": 19,
+  "name": "mahoro",
+  "fullName": "浜崎 まほろ",
+  "fullNameChinese": "濱崎茉幌",
+  "fullNameEnglish": "Mahoro Hamasaki",
+  "shortName": "まほろ",
+  "bandId": 4,
+  "bandName": "millsage",
+  "birthday": "7-16",
+  "color": "#77FFFF",
+  "aliases": [
+   "mahoro",
+   "まほろ",
+   "浜崎まほろ",
+   "濱崎茉幌",
+   "茉幌"
+  ]
+ },
+ {
+  "characterId": 20,
+  "name": "houka",
+  "fullName": "和泉 朋花",
+  "fullNameChinese": "和泉朋花",
+  "fullNameEnglish": "Houka Izumi",
+  "shortName": "朋花",
+  "bandId": 4,
+  "bandName": "millsage",
+  "birthday": "10-24",
+  "color": "#EE99EE",
+  "aliases": [
+   "houka",
+   "和泉朋花",
+   "朋花"
+  ]
+ },
+ {
+  "characterId": 21,
+  "name": "raika",
+  "fullName": "須賀 蕾叶",
+  "fullNameChinese": "須賀蕾葉",
+  "fullNameEnglish": "Raika Suga",
+  "shortName": "蕾叶",
+  "bandId": 5,
+  "bandName": "一家Dumb Rock!",
+  "birthday": "7-28",
+  "color": "#FF7700",
+  "aliases": [
+   "raika",
+   "蕾叶",
+   "蕾葉",
+   "須賀蕾叶",
+   "須賀蕾葉"
+  ]
+ },
+ {
+  "characterId": 22,
+  "name": "miku",
+  "fullName": "馬橋 心玖",
+  "fullNameChinese": "馬橋心玖",
+  "fullNameEnglish": "Miku Mahashi",
+  "shortName": "心玖",
+  "bandId": 5,
+  "bandName": "一家Dumb Rock!",
+  "birthday": "10-4",
+  "color": "#22CCFF",
+  "aliases": [
+   "miku",
+   "心玖",
+   "馬橋心玖"
+  ]
+ },
+ {
+  "characterId": 23,
+  "name": "yomogi",
+  "fullName": "矢倉 蓬咲",
+  "fullNameChinese": "矢倉蓬咲",
+  "fullNameEnglish": "Yomogi Yakura",
+  "shortName": "蓬咲",
+  "bandId": 5,
+  "bandName": "一家Dumb Rock!",
+  "birthday": "5-6",
+  "color": "#448888",
+  "aliases": [
+   "yomogi",
+   "矢倉蓬咲",
+   "蓬咲"
+  ]
+ },
+ {
+  "characterId": 24,
+  "name": "chieri",
+  "fullName": "梅里 ちえり",
+  "fullNameChinese": "梅里千櫻梨",
+  "fullNameEnglish": "Chieri Umezato",
+  "shortName": "ちえり",
+  "bandId": 5,
+  "bandName": "一家Dumb Rock!",
+  "birthday": "4-2",
+  "color": "#FF55AA",
+  "aliases": [
+   "chieri",
+   "ちえり",
+   "千櫻梨",
+   "梅里ちえり",
+   "梅里千櫻梨"
+  ]
+ },
+ {
+  "characterId": 25,
+  "name": "shizuku",
+  "fullName": "四宮 寧月",
+  "fullNameChinese": "四宮寧月",
+  "fullNameEnglish": "Shizuku Shinomiya",
+  "shortName": "寧月",
+  "bandId": 5,
+  "bandName": "一家Dumb Rock!",
+  "birthday": "3-5",
+  "color": "#9999FF",
+  "aliases": [
+   "shizuku",
+   "四宮寧月",
+   "寧月"
+  ]
+ }
+]
