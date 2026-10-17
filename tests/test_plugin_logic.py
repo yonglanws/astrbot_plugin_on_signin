@@ -16,6 +16,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -781,6 +782,205 @@ check("_card_asset_urls returns primary + fallbacks",
 check("_jacket_urls returns primary + fallbacks",
       plugin_main.MyPlugin._jacket_urls(None, "jkt_001_100001")[1] != ())
 
+# 8d) 截断/坏图绝不能进缓存（这是"图层永久空白"的根因回归测试）
+inst8d = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8d.cache_dir = tmp_inst_dir / "cache8d"
+inst8d.download_timeout = 2
+inst8d._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8d.data_dir = tmp_inst_dir
+inst8d.master_dir = tmp_inst_dir / "masterdata"
+inst8d._sync_lock = threading.Lock()
+inst8d._sync_state = {"last_sync": None, "running": False}
+inst8d.ASSET_HEADERS = {"User-Agent": "x"}
+
+from PIL import Image as _PILImage
+_buf = io.BytesIO()
+_PILImage.new("RGB", (64, 64), (10, 120, 200)).save(_buf, format="PNG")
+_full_png = _buf.getvalue()
+_trunc_png = _full_png[:len(_full_png) // 2]   # 头完整、数据截断
+
+check("magic check accepts a real png",
+      plugin_main.MyPlugin._looks_like_image(_full_png))
+check("magic check rejects empty payload",
+      not plugin_main.MyPlugin._looks_like_image(b""))
+check("magic check rejects short payload",
+      not plugin_main.MyPlugin._looks_like_image(b"abc"))
+check("magic check rejects non-image bytes",
+      not plugin_main.MyPlugin._looks_like_image(b"<html>404 not found</html>" + b"x" * 40))
+
+
+class _TruncConn:
+    """read() 返回半张图后断开：真实 CDN 掉线的表现"""
+    def __init__(self):
+        self._n = 0
+    def read(self, *a):
+        if self._n == 0:
+            self._n = 1
+            return _trunc_png
+        raise OSError("Remote end closed connection without response")
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+def _trunc_urlopen(req, timeout=None):
+    raise OSError("Truncated File Read")
+
+
+# 预置一个坏 .bin，下次必须识别出来并重新下载
+inst8d.cache_dir.mkdir(parents=True, exist_ok=True)
+(inst8d.cache_dir / "card_63_member_character.bin").write_bytes(_trunc_png)
+
+inst8e = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8e.cache_dir = tmp_inst_dir / "cache8e"
+inst8e.download_timeout = 2
+inst8e._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8e.data_dir = tmp_inst_dir
+inst8e.master_dir = tmp_inst_dir / "masterdata"
+inst8e._sync_lock = threading.Lock()
+inst8e._sync_state = {"last_sync": None, "running": False}
+inst8e.ASSET_HEADERS = {"User-Agent": "x"}
+
+try:
+    # 截断图编码必须抛异常，而不是"用原始数据兜底"把坏图缓存起来
+    raised = False
+    try:
+        inst8e._image_to_base64(_trunc_png, 800, 75, fmt="WEBP", cache_key="bad1")
+    except Exception:
+        raised = True
+    check("truncated image raises instead of caching broken data", raised)
+    check("nothing written to encoded cache for broken image",
+          not (inst8e.cache_dir / "encoded" / "bad1.txt").exists())
+
+    # 完整图正常编码，且写缓存
+    good = inst8e._image_to_base64(_full_png, 800, 75, fmt="WEBP", cache_key="good1")
+    check("valid image encodes to data URI", good.startswith("data:image/webp;base64,"))
+    check("valid image written to encoded cache",
+          (inst8e.cache_dir / "encoded" / "good1.txt").exists())
+
+    # 脏 encoded 缓存（空串/非 data URI）必须被拒
+    enc_dir = inst8e.cache_dir / "encoded"
+    enc_dir.mkdir(parents=True, exist_ok=True)
+    (enc_dir / "empty.txt").write_text("", encoding="utf-8")
+    (enc_dir / "garbage.txt").write_text("not-a-data-uri", encoding="utf-8")
+    check("empty encoded cache rejected", inst8e._read_encoded_cache("empty") == "")
+    check("garbage encoded cache rejected", inst8e._read_encoded_cache("garbage") == "")
+    check("valid encoded cache accepted",
+          inst8e._read_encoded_cache("good1").startswith("data:image/"))
+except Exception as e:
+    check("truncated-image handling", False, repr(e)[:200])
+
+# 所有源都只给截断数据时，_get_card_images 必须返回空图层且不崩
+plugin_main.urllib.request.urlopen = _trunc_urlopen
+try:
+    r = asyncio.run(inst8d._get_card_images(63))
+    check("all-truncated sources yield empty layers", list(r) == ["", ""], str(r))
+except Exception as e:
+    check("all-truncated sources handled", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+check("_fetch_image validates payload magic",
+      "_looks_like_image" in inspect.getsource(plugin_main.MyPlugin._fetch_image))
+check("corrupt disk cache is purged, not served",
+      "缓存图片损坏" in inspect.getsource(plugin_main.MyPlugin._fetch_image))
+check("no raw-bytes fallback in encoder (would cache broken images)",
+      "使用原始数据" not in inspect.getsource(plugin_main.MyPlugin._image_to_base64))
+
+# 8e) 源健康度：单源连续失败（Cloudflare 限流重置连接）时应自动排到后面
+inst8f = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8f.cache_dir = tmp_inst_dir / "cache8f"
+inst8f.download_timeout = 2
+inst8f._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8f.data_dir = tmp_inst_dir
+inst8f.master_dir = tmp_inst_dir / "masterdata"
+inst8f._sync_lock = threading.Lock()
+inst8f._sync_state = {"last_sync": None, "running": False}
+inst8f.ASSET_HEADERS = {"User-Agent": "x"}
+
+_uh = "https://haneoka.org/x/member_character.png"
+_ub = "https://assets.bdon.moe/x/member_character/member_character.webp"
+
+
+def _hosts(inst):
+    return [plugin_main.MyPlugin._source_key(inst, u) for u, _ in
+            inst._order_sources([(_uh, 2), (_ub, 2)])]
+
+
+check("sources start in mirror order", _hosts(inst8f)[0].startswith("haneoka"), str(_hosts(inst8f)))
+inst8f._note_source_result(_uh, False)
+inst8f._note_source_result(_uh, False)
+check("failed source is deprioritized", _hosts(inst8f)[0].startswith("assets.bdon"), str(_hosts(inst8f)))
+inst8f._note_source_result(_uh, True)
+check("source recovers after a success", _hosts(inst8f)[0].startswith("haneoka"), str(_hosts(inst8f)))
+inst8f._note_source_result(_ub, False)
+# 手动把失败时间推到很久以前，冷却应失效并恢复原顺序
+inst8f._source_state[plugin_main.MyPlugin._source_key(inst8f, _ub)]['failed_at'] = time.time() - 9999
+check("cooldown expires and order restores", _hosts(inst8f)[0].startswith("haneoka"), str(_hosts(inst8f)))
+check("source cooldown configured", plugin_main.MyPlugin._SOURCE_COOLDOWN > 0)
+
+# 404 不应触发源惩罚（资源缺失 ≠ 源坏了）
+inst8g = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8g.cache_dir = tmp_inst_dir / "cache8g"
+inst8g.download_timeout = 2
+inst8g._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8g.data_dir = tmp_inst_dir
+inst8g.master_dir = tmp_inst_dir / "masterdata"
+inst8g._sync_lock = threading.Lock()
+inst8g._sync_state = {"last_sync": None, "running": False}
+inst8g.ASSET_HEADERS = {"User-Agent": "x"}
+
+
+def _urlopen_404b(req, timeout=None):
+    raise urllib.error.HTTPError(_uh, 404, "Not Found", {}, None)
+
+
+plugin_main.urllib.request.urlopen = _urlopen_404b
+try:
+    inst8g._fetch_image(_uh, "k404", fallback_urls=[])
+    check("404 raises", False, "should have raised")
+except urllib.error.HTTPError as e:
+    check("404 raises HTTPError", e.code == 404)
+except Exception as e:
+    check("404 raises HTTPError", False, repr(e)[:120])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+state404 = inst8g._source_state.get(plugin_main.MyPlugin._source_key(inst8g, _uh), {})
+check("404 does not mark the source unhealthy", state404.get('fails', 0) == 0, str(state404))
+
+# 8f) 连接被重置（Cloudflare 限流的典型表现）必须记一次源失败
+inst8h = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8h.cache_dir = tmp_inst_dir / "cache8h"
+inst8h.download_timeout = 1
+inst8h._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8h.data_dir = tmp_inst_dir
+inst8h.master_dir = tmp_inst_dir / "masterdata"
+inst8h._sync_lock = threading.Lock()
+inst8h._sync_state = {"last_sync": None, "running": False}
+inst8h.ASSET_HEADERS = {"User-Agent": "x"}
+
+
+def _urlopen_reset(req, timeout=None):
+    raise OSError("Remote end closed connection without response")
+
+
+plugin_main.urllib.request.urlopen = _urlopen_reset
+try:
+    inst8h._fetch_image(_uh, "kreset", fallback_urls=[])
+    check("connection reset raises", False, "should have raised")
+except Exception as e:
+    check("connection reset raises", "closed connection" in str(e) or "Remote" in str(e), repr(e)[:80])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+st = inst8h._source_state.get(plugin_main.MyPlugin._source_key(inst8h, _uh), {})
+check("connection reset marks the source unhealthy", st.get('fails', 0) >= 1, str(st))
+check("deprioritized after connection resets",
+      [plugin_main.MyPlugin._source_key(inst8h, u) for u, _ in
+       inst8h._order_sources([(_uh, 2), (_ub, 2)])][0].startswith("assets.bdon"))
+
 print()
 print("=" * 70)
 print("TEST 5d: 角色贴纸分配（宜/忌必须不同）")
@@ -1105,32 +1305,61 @@ print("TEST 7: Live cloud asset reachability (all SR+/BD cards)")
 print("=" * 70)
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 asset_ids = sorted({c["asset_id"] for c in cards})
-bad_char, bad_bg = [], []
-for aid in asset_ids:
-    for kind, bucket in (("member_character", bad_char), ("member_background", bad_bg)):
-        url = f"https://haneoka.org/assets/intl/Assets/AddressableResources/MemberCard/{aid}/{kind}.png"
+
+
+def _probe(url, kind, tries=3, pause=1.0):
+    """带重试的探测。
+
+    haneoka.org 背后是 Cloudflare，实测连续约 40 个请求后会开始 SSL 重置
+    （URLError: UNEXPECTED_EOF_WHILE_READING），停几秒就恢复。
+    这不是资源不存在，所以探测要像插件那样重试，不能一次失败就判死。
+
+    kind: "png" 校验 PNG 魔数，"webp" 校验 RIFF....WEBP 结构。
+    """
+    last = None
+    for i in range(tries):
         try:
             req = urllib.request.Request(url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=25) as r:
-                magic = r.read(8)
-            if magic != b"\x89PNG\r\n\x1a\n":
-                bucket.append((aid, kind, "not-png"))
+                head = r.read(16)
+            if kind == "png":
+                if head[:8] != b"\x89PNG\r\n\x1a\n":
+                    return f"not-png:{head[:12]!r}"
+            else:
+                if head[:4] != b"RIFF" or head[8:12] != b"WEBP":
+                    return f"not-webp:{head[:12]!r}"
+            return None
+        except urllib.error.HTTPError as e:
+            if e.code in (404, 403):
+                return f"HTTP {e.code}"
+            last = f"HTTP {e.code}"
         except Exception as e:
-            bucket.append((aid, kind, repr(e)[:60]))
+            last = repr(e)[:50]
+        if i < tries - 1:
+            time.sleep(pause)
+    return last
+
+
+bad_char, bad_bg = [], []
+for aid in asset_ids:
+    for kind, bucket in (("member_character", bad_char), ("member_background", bad_bg)):
+        err = _probe(
+            f"https://haneoka.org/assets/intl/Assets/AddressableResources/MemberCard/{aid}/{kind}.png",
+            "png")
+        if err:
+            bucket.append((aid, kind, err))
+        time.sleep(0.35)   # 让开 Cloudflare 的突发阈值
 check(f"all {len(asset_ids)} card 立绘 downloadable", not bad_char, str(bad_char[:5]))
 check(f"all {len(asset_ids)} card 背景 downloadable", not bad_bg, str(bad_bg[:5]))
 
 jacket_bad = []
 for s in songs[:12]:
-    url = f"https://haneoka.org/assets/intl/Assets/AddressableResources/Image/Jacket/{s['jacket']}.png"
-    try:
-        req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=25) as r:
-            magic = r.read(8)
-        if magic != b"\x89PNG\r\n\x1a\n":
-            jacket_bad.append((s["jacket"], "not-png"))
-    except Exception as e:
-        jacket_bad.append((s["jacket"], repr(e)[:60]))
+    err = _probe(
+        f"https://haneoka.org/assets/intl/Assets/AddressableResources/Image/Jacket/{s['jacket']}.png",
+        "png")
+    if err:
+        jacket_bad.append((s["jacket"], err))
+    time.sleep(0.35)
 check("sampled 12 jackets downloadable", not jacket_bad, str(jacket_bad[:5]))
 
 # 备选源 bdon.moe 必须同样可用（主源抽风时靠它兜底）
@@ -1138,29 +1367,20 @@ mirror_bad = []
 sample_ids = asset_ids[:6] + asset_ids[-6:]
 for aid in sample_ids:
     for kind in ("member_character", "member_background"):
-        url = f"https://assets.bdon.moe/zh-Hans/MemberCard/{aid}/{kind}/{kind}.webp"
-        try:
-            req = urllib.request.Request(url, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=25) as r:
-                magic = r.read(4)
-            if magic != b"RIFF":
-                mirror_bad.append((aid, kind, "not-webp"))
-        except Exception as e:
-            mirror_bad.append((aid, kind, repr(e)[:60]))
+        err = _probe(
+            f"https://assets.bdon.moe/zh-Hans/MemberCard/{aid}/{kind}/{kind}.webp", "webp")
+        if err:
+            mirror_bad.append((aid, kind, err))
+        time.sleep(0.35)
 check(f"mirror serves {len(sample_ids)*2} card assets", not mirror_bad, str(mirror_bad[:5]))
 
 mirror_jacket_bad = []
 for s in songs[:12]:
     j = s["jacket"]
-    url = f"https://assets.bdon.moe/zh-Hans/Image/Jacket/{j}/{j}.webp"
-    try:
-        req = urllib.request.Request(url, headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=25) as r:
-            magic = r.read(4)
-        if magic != b"RIFF":
-            mirror_jacket_bad.append((j, "not-webp"))
-    except Exception as e:
-        mirror_jacket_bad.append((j, repr(e)[:60]))
+    err = _probe(f"https://assets.bdon.moe/zh-Hans/Image/Jacket/{j}/{j}.webp", "webp")
+    if err:
+        mirror_jacket_bad.append((j, err))
+    time.sleep(0.35)
 check("mirror serves sampled 12 jackets", not mirror_jacket_bad, str(mirror_jacket_bad[:5]))
 
 print()

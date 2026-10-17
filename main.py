@@ -1212,6 +1212,68 @@ class MyPlugin(Star):
     # 云端资产下载与缓存
     # ------------------------------------------------------------------ #
 
+    # 常见图片格式的魔数。用于三处校验：下载回来的数据、磁盘缓存读出来的数据、
+    # 以及 Pillow 解码后的成品。任何一处看起来不像图片就当失败处理，绝不写入缓存。
+    IMAGE_MAGICS = (
+        b"\x89PNG\r\n\x1a\n",   # png
+        b"\xff\xd8\xff",        # jpeg
+        b"RIFF",                # webp（RIFF....WEBP）
+        b"GIF87a", b"GIF89a",
+    )
+
+    @classmethod
+    def _looks_like_image(cls, data: bytes) -> bool:
+        """粗判一段字节是不是图片：至少要有内容且以已知图片魔数开头"""
+        if not data or len(data) < 32:
+            return False
+        if data[:4] == b"RIFF":
+            # webp：RIFF<size>WEBP
+            return data[8:12] == b"WEBP"
+        return any(data.startswith(m) for m in cls.IMAGE_MAGICS if m != b"RIFF")
+
+    # 源健康度跟踪：Cloudflare 限流时会直接重置连接，一次失败不代表资源不存在。
+    # 记录"最近一次失败时间 + 连续失败次数"，用于把可疑源排到后面。
+    _SOURCE_COOLDOWN = 20.0      # 秒：源失败后的冷却时长
+
+    def _source_health(self) -> dict:
+        if not hasattr(self, '_source_state'):
+            self._source_state = {}
+        return self._source_state
+
+    def _source_key(self, url: str) -> str:
+        try:
+            from urllib.parse import urlparse
+            return urlparse(url).netloc
+        except Exception:
+            return url
+
+    def _note_source_result(self, url: str, ok: bool):
+        """记录一次源访问结果，用于后续排序"""
+        state = self._source_health()
+        key = self._source_key(url)
+        entry = state.setdefault(key, {'fails': 0, 'failed_at': 0.0})
+        if ok:
+            entry['fails'] = 0
+            entry['failed_at'] = 0.0
+        else:
+            entry['fails'] += 1
+            entry['failed_at'] = time.time()
+
+    def _order_sources(self, candidates):
+        """把"刚失败过、还在冷却期"的源排到最后；其余保持原顺序"""
+        now = time.time()
+        state = self._source_health()
+
+        def _penalty(item):
+            entry = state.get(self._source_key(item[0]))
+            if not entry or entry['fails'] == 0:
+                return 0
+            if now - entry['failed_at'] > self._SOURCE_COOLDOWN:
+                return 0            # 冷却已过，恢复正常优先级
+            return 1 + min(entry['fails'], 3)
+
+        return sorted(candidates, key=_penalty)
+
     def _fetch_image(self, url: str, cache_key: str, ttl_hours: int = 168,
                      fallback_urls=()) -> bytes:
         """下载图片并写入本地磁盘缓存；命中缓存直接读文件（内存零占用）
@@ -1227,29 +1289,52 @@ class MyPlugin(Star):
             if cache_path.exists():
                 age = datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)
                 if age < timedelta(hours=ttl_hours):
-                    return cache_path.read_bytes()
+                    cached = cache_path.read_bytes()
+                    # 上一次可能存进去了半张图（连接读到一半断掉）。校验魔数，
+                    # 不合格就删掉重新下载，否则这个 key 会一直返回坏图。
+                    if self._looks_like_image(cached):
+                        return cached
+                    logger.warning(f"🧹 缓存图片损坏，重新下载 {cache_key}（{len(cached)} 字节）")
+                    try:
+                        cache_path.unlink()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
         # 主源 + 备选源依次尝试；每个源最多 2 次（退避 0.4s/0.9s 避开限流窗口）
+        # 源级冷却：某个源刚连续失败过（Cloudflare 限流会重置连接），
+        # 就把它排到最后，让健康的源先上，避免每张图都先在坏源上耗掉两轮超时。
         candidates = [(url, 2)] + [(u, 2) for u in (fallback_urls or [])]
+        ordered = self._order_sources(candidates)
         last_err = None
         data = None
-        for candidate_url, attempts in candidates:
+        for candidate_url, attempts in ordered:
             for attempt in range(attempts):
+                data = None              # 每次尝试都从零开始，绝不继承上一次的半张图
                 try:
                     req = urllib.request.Request(candidate_url, headers=self.ASSET_HEADERS)
                     with urllib.request.urlopen(req, timeout=self.download_timeout) as resp:
                         data = resp.read()
+                    # 读到一半断流时 read() 也可能不报错，只返回截断的数据。
+                    # 校验不通过就继续重试/换源。
+                    if not self._looks_like_image(data):
+                        raise OSError(f"响应不是有效图片（{len(data or b'')} 字节）")
+                    self._note_source_result(candidate_url, True)
                     break
                 except urllib.error.HTTPError as e:
                     # 404/403 说明这个源没有这张图，换源比重试有用
                     last_err = e
-                    if e.code in (404, 403, 410) or attempt == attempts - 1:
+                    if e.code in (404, 403, 410):
+                        self._note_source_result(candidate_url, True)   # 源是好的，只是没这张图
+                        break
+                    self._note_source_result(candidate_url, False)
+                    if attempt == attempts - 1:
                         break
                     time.sleep(0.4 * (attempt + 1) ** 2)
                 except Exception as e:
                     last_err = e
+                    self._note_source_result(candidate_url, False)
                     if attempt == attempts - 1:
                         break
                     time.sleep(0.4 * (attempt + 1) ** 2)
@@ -1303,44 +1388,54 @@ class MyPlugin(Star):
 
         传入 cache_key 时会把编码结果落到磁盘，下次同一张图直接读字符串，
         省掉一次解码 + 重编码（约 0.3s/张）。
+
+        解码失败（多半是下载只拿到半张图）时直接抛异常，绝不做"用原始数据兜底"：
+        坏图一旦写进 encoded 缓存就会长期生效，图层会一直空着。
         """
         if cache_key:
             cached = self._read_encoded_cache(cache_key)
             if cached:
                 return cached
 
-        result = None
-        try:
-            img = Image.open(io.BytesIO(img_data))
-            w, h = img.size
-            if max(w, h) > max_size:
-                ratio = max_size / max(w, h)
-                new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
-                img = img.resize((new_w, new_h), Image.LANCZOS)
-            if fmt == "WEBP":
-                mime, save_fmt = "image/webp", "WEBP"
-            else:
-                mime, save_fmt = "image/jpeg", "JPEG"
-            if save_fmt == "JPEG" and img.mode in ("RGBA", "LA", "P"):
-                img = img.convert("RGB")
-            buf = io.BytesIO()
-            # optimize=True 在多字节图片上收益有限但耗时明显，这里按体积取舍
-            img.save(buf, format=save_fmt, quality=quality)
-            result = f"data:{mime};base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
-        except Exception as e:
-            logger.warning(f"图片压缩失败，使用原始数据: {e}")
-            result = f"data:image/png;base64,{base64.b64encode(img_data).decode('utf-8')}"
+        # load() 会让 Pillow 真正解码全部像素；截断的图在这一步就会报错。
+        # 只调 Image.open 不 load 的话，截断图会被当成合法图继续往下走。
+        img = Image.open(io.BytesIO(img_data))
+        img.load()
+        w, h = img.size
+        if max(w, h) > max_size:
+            ratio = max_size / max(w, h)
+            new_w, new_h = max(1, int(w * ratio)), max(1, int(h * ratio))
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+        if fmt == "WEBP":
+            mime, save_fmt = "image/webp", "WEBP"
+        else:
+            mime, save_fmt = "image/jpeg", "JPEG"
+        if save_fmt == "JPEG" and img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        # optimize=True 在多字节图片上收益有限但耗时明显，这里按体积取舍
+        img.save(buf, format=save_fmt, quality=quality)
+        encoded = buf.getvalue()
+        # 再解码一次确认输出完整，防止 Pillow 对某些截断图静默产出半张
+        Image.open(io.BytesIO(encoded)).load()
+        result = f"data:{mime};base64,{base64.b64encode(encoded).decode('utf-8')}"
 
         if cache_key and result:
             self._write_encoded_cache(cache_key, result)
         return result
 
     def _read_encoded_cache(self, cache_key: str) -> str:
-        """读已编码好的 data URI（存在缓存目录，与原始图片分开存放）"""
+        """读已编码好的 data URI（存在缓存目录，与原始图片分开存放）
+
+        读到的内容也必须是完整 data URI，否则视为无效，让调用方重新下载。
+        """
         try:
             path = self.cache_dir / "encoded" / f"{cache_key}.txt"
             if path.exists():
-                return path.read_text(encoding='utf-8')
+                value = path.read_text(encoding='utf-8')
+                if value.startswith("data:image/") and ";base64," in value:
+                    return value
+                logger.warning(f"🧹 编码缓存无效，重新下载 {cache_key}")
         except Exception:
             pass
         return ""
