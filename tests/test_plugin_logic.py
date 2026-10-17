@@ -270,7 +270,7 @@ check("__init__ calls _load_character_metadata", "_load_character_metadata()" in
 cases = [
     ("ena", None),          # 世界计划角色，应解析不到
     ("tomori", 1), ("anon", 2), ("rana", 3), ("soyo", 4), ("taki", 5),
-    ("高松燈", 1), ("千早愛音", 2), ("長崎爽世", 4), ("祥子", 10), ("初華", 6),
+    ("高松燈", 1), ("千早愛音", 2), ("长崎素世", 4), ("祥子", 10), ("初華", 6),
     ("睦", 7), ("海鈴", 8), ("にゃむ", 9), ("阿拉蕾", 11), ("野乃花", 12),
     ("miku", 22), ("心玖", 22), ("四宮寧月", 25),
 ]
@@ -684,14 +684,102 @@ try:
         return r, asyncio.get_running_loop().time() - t0
 
     res, el = asyncio.run(asyncio.wait_for(_budget_probe(), timeout=30))
-    check("hanging download bounded by overall budget", el < 12, f"{el:.1f}s")
+    check("hanging download bounded by overall budget", el < 25, f"{el:.1f}s")
     check("bounded download returns empty layers", res == ("", ""), str(res))
 except Exception as e:
     check("hanging download bounded by overall budget", False, repr(e)[:200])
 finally:
     plugin_main.urllib.request.urlopen = orig_urlopen
 
-check("overall budget derived from download_timeout", "download_timeout * 2" in src_main)
+check("overall budget derived from download_timeout (covers 2 sources x 2 tries x 2 rounds)",
+      "download_timeout * 8" in src_main)
+
+# 8b) 多源：主源全失败时自动切备选源，用户仍能拿到图
+import urllib.error
+
+inst8b = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8b.cache_dir = tmp_inst_dir / "cache8b"
+inst8b.download_timeout = 2
+inst8b._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8b.data_dir = tmp_inst_dir
+inst8b.master_dir = tmp_inst_dir / "masterdata"
+inst8b._sync_lock = threading.Lock()
+inst8b._sync_state = {"last_sync": None, "running": False}
+
+_mirror_calls = []
+
+
+def _mirror_urlopen(req, timeout=None):
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    _mirror_calls.append(url)
+    # 主源（haneoka.org）一律连接被重置；备选源（bdon.moe）正常返回
+    if "haneoka.org" in url:
+        raise OSError("Remote end closed connection without response")
+    if "assets.bdon.moe" in url:
+        return _Ctx(png)
+    raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+
+orig_m = plugin_main.urllib.request.urlopen
+plugin_main.urllib.request.urlopen = _mirror_urlopen
+try:
+    ch, bg = asyncio.run(inst8b._get_card_images(63))
+    check("mirror fallback yields 立绘", ch.startswith("data:image/"), repr(ch)[:60])
+    check("mirror fallback yields 背景", bg.startswith("data:image/"), repr(bg)[:60])
+    tried_haneoka = any("haneoka.org" in u for u in _mirror_calls)
+    tried_bdon = any("assets.bdon.moe" in u for u in _mirror_calls)
+    check("primary source tried first", tried_haneoka, str(_mirror_calls[:4]))
+    check("mirror used after primary failed", tried_bdon, str(_mirror_calls[:6]))
+    check("mirror URLs are bdon webp paths",
+          all(u.endswith(".webp") for u in _mirror_calls if "assets.bdon.moe" in u))
+except Exception as e:
+    check("mirror fallback works", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig_m
+
+# 8c) 主源 404 时不应在原源上反复重试，应尽快换源
+inst8c = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8c.cache_dir = tmp_inst_dir / "cache8c"
+inst8c.download_timeout = 2
+inst8c._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8c.data_dir = tmp_inst_dir
+inst8c.master_dir = tmp_inst_dir / "masterdata"
+inst8c._sync_lock = threading.Lock()
+inst8c._sync_state = {"last_sync": None, "running": False}
+
+_404_calls = []
+
+
+def _urlopen_404(req, timeout=None):
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    _404_calls.append(url)
+    raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+
+plugin_main.urllib.request.urlopen = _urlopen_404
+try:
+    r = asyncio.run(inst8c._get_card_images(63))
+    primary_calls = sum(1 for u in _404_calls if "haneoka.org" in u)
+    mirror_calls = sum(1 for u in _404_calls if "assets.bdon.moe" in u)
+    # 每张图只请求主源一次、备选源一次：404 不原地重试，直接换源
+    check("404 on primary does not retry the same source", primary_calls == 2, f"{primary_calls} calls")
+    check("404 falls through to the mirror", mirror_calls == 2, f"{mirror_calls} calls")
+    check("all sources exhausted yields empty layers", list(r) == ["", ""], str(r))
+except Exception as e:
+    check("404 handling", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+check("ASSET_MIRRORS declares 2 sources",
+      len(getattr(plugin_main, "ASSET_MIRRORS", [])) == 2,
+      str(len(getattr(plugin_main, "ASSET_MIRRORS", []))))
+check("haneoka is the primary source",
+      plugin_main.ASSET_MIRRORS[0]["name"] == "haneoka",
+      plugin_main.ASSET_MIRRORS[0]["name"])
+check("_card_asset_urls returns primary + fallbacks",
+      plugin_main.MyPlugin._card_asset_urls(None, 30, "member_character")[1] != ())
+check("_jacket_urls returns primary + fallbacks",
+      plugin_main.MyPlugin._jacket_urls(None, "jkt_001_100001")[1] != ())
 
 print()
 print("=" * 70)
@@ -764,11 +852,11 @@ if sticker_manifest_path.exists():
 
     # 渲染数据必须用贴纸，并且模板三个占位符都在
     check("render uses picked stickers", '"b64ok": st_ok' in src_main)
-    check("saved-state stickers preferred", "card.get('sticker_ok')" in src_main)
+    check("stickers always picked from the card's character",
+          "self._pick_stickers(card.get('character_id'))" in src_main)
     check("stickers persisted in daily state",
           "'sticker_ok': st_ok" in src_main and "'sticker_yi': st_yi" in src_main)
-    check("daily state restores stickers", "existing_daily_state.get('sticker_ok'" in src_main)
-    check("DB has sticker columns",
+    check("daily state stores sticker columns",
           all(c in src_main for c in ("sticker_ok TEXT", '("sticker_ok", "TEXT")')))
 
     # 立绘仅下移不缩小：高度保持 142%，bottom 负值加大
@@ -790,6 +878,45 @@ if sticker_manifest_path.exists():
     if m4:
         sc3 = _re2.search(r"transform:\s*scale\(([\d.]+)\)", m4.group(1))
         check("success icon scale reduced below 1.18", sc3 and float(sc3.group(1)) < 1.18, m4.group(1).strip()[:160])
+
+print()
+print("=" * 70)
+print("TEST 5e: 重复签到行为（卡面/贴纸可变，宜忌固定）")
+print("=" * 70)
+# 重复签到分支：运势/宜/忌/歌曲从存档读，卡面与贴纸重新抽
+check("repeat signin reuses saved fortune",
+      "existing_daily_state.get('fortune_level'" in src_main)
+check("repeat signin reuses saved 宜", "existing_daily_state.get('yi_activity'" in src_main)
+check("repeat signin reuses saved 忌", "existing_daily_state.get('ji_activity'" in src_main)
+check("repeat signin reuses saved songs",
+      "existing_daily_state.get('song1_name'" in src_main
+      and "existing_daily_state.get('song2_name'" in src_main)
+check("repeat signin re-rolls the card",
+      "existing_daily_state" in src_main and "_select_random_card(specified_character_id)" in src_main)
+check("repeat signin honors explicit character query",
+      "if card is None and specified_character_id is not None" in src_main)
+# 存档分支不再把已存卡面/贴纸塞进 card，否则就变成"固定"而不是"可变换"
+check("saved card is not reused verbatim",
+      "card = {\n                'asset_id': existing_daily_state" not in src_main)
+# 新抽的卡面必须带上 character_id，贴纸才能跟着角色走
+check("re-rolled card carries character_id",
+      "_secure_random_choice(pool)" in src_main and "_secure_random_choice(self.cards)" in src_main)
+
+# 用真实实例验证：重复签到连续抽到的卡面应当会变化（42 张卡，抽 10 次至少出现 2 种）
+inst_r = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst_r.cards = cards
+inst_r._cards_by_character = {}
+seen = {inst_r._select_random_card()["asset_id"] for _ in range(10)}
+check("repeat signin can vary the card (>=2 distinct in 10 draws)", len(seen) >= 2, str(sorted(seen)))
+# 每个卡面都带 character_id，且贴纸按该角色抽取时宜/忌仍不同
+for _ in range(50):
+    c = inst_r._select_random_card()
+    ok, yi, ji = inst_s._pick_stickers(c["character_id"])
+    if c["character_id"] in three:
+        assert ok != yi and ok != ji and yi != ji, c
+    else:
+        assert yi != ji, c
+check("re-rolled card stickers follow the new character", True)
 
 print()
 print("=" * 70)
@@ -932,33 +1059,45 @@ try:
         r = await inst_h.prefetch_signin_assets(63, ["jkt_001_100001", "jkt_002_100043"])
         return r, asyncio.get_running_loop().time() - t0
     r, el = asyncio.run(asyncio.wait_for(_p(), timeout=30))
-    check("prefetch bounded by budget on hang", el < 12, f"{el:.1f}s")
+    check("prefetch bounded by budget on hang", el < 25, f"{el:.1f}s")
     check("prefetch returns 4 empties on hang", r == ("", "", "", ""), str(r))
 except Exception as e:
     check("prefetch bounded by budget on hang", False, repr(e)[:200])
 finally:
     plugin_main.urllib.request.urlopen = orig3
 
-# 6) 下载不重试（重试会让最坏耗时翻倍，快速失败更好）
-check("download does not retry (fail fast)", "for attempt in range(2)" not in src_main)
+# 6) 下载重试（主源失败先原地重试，再换备选源）
+check("download retries up to 2 times per source", "[(url, 2)]" in src_main)
+check("retry backs off (no hammering)", "time.sleep(0.4" in src_main)
+check("HTTP 404 short-circuits to the next source", "404, 403, 410" in src_main)
 
 # 7) 不再发送 keep-alive：实测该 CDN 复用连接会超时
 check("no keep-alive header (CDN closes idle conns)", '"Connection": "keep-alive"' not in src_main)
 
 print()
 print("=" * 70)
-print("TEST 6: Cloud asset URL construction")
+print("TEST 6: Cloud asset URL construction (primary + mirror)")
 print("=" * 70)
 check("card character URL pattern",
       plugin_main.MyPlugin._card_asset_url(None, 29, "member_character")
-      == "https://assets.bdon.moe/zh-Hans/MemberCard/29/member_character/member_character.webp",
+      == "https://haneoka.org/assets/intl/Assets/AddressableResources/MemberCard/29/member_character.png",
       plugin_main.MyPlugin._card_asset_url(None, 29, "member_character"))
 check("card background URL pattern",
       plugin_main.MyPlugin._card_asset_url(None, 29, "member_background")
-      == "https://assets.bdon.moe/zh-Hans/MemberCard/29/member_background/member_background.webp")
+      == "https://haneoka.org/assets/intl/Assets/AddressableResources/MemberCard/29/member_background.png")
 check("jacket URL pattern",
       plugin_main.MyPlugin._jacket_url(None, "jkt_001_100001")
-      == "https://assets.bdon.moe/zh-Hans/Image/Jacket/jkt_001_100001/jkt_001_100001.webp")
+      == "https://haneoka.org/assets/intl/Assets/AddressableResources/Image/Jacket/jkt_001_100001.png")
+
+prim_ch, fb_ch = plugin_main.MyPlugin._card_asset_urls(None, 29, "member_character")
+check("primary is haneoka (faster/more reliable)", prim_ch.startswith("https://haneoka.org"), prim_ch)
+check("mirror card URL is bdon webp",
+      fb_ch and fb_ch[0] == "https://assets.bdon.moe/zh-Hans/MemberCard/29/member_character/member_character.webp",
+      str(fb_ch))
+prim_jk, fb_jk = plugin_main.MyPlugin._jacket_urls(None, "jkt_001_100001")
+check("mirror jacket URL is bdon webp",
+      fb_jk and fb_jk[0] == "https://assets.bdon.moe/zh-Hans/Image/Jacket/jkt_001_100001/jkt_001_100001.webp",
+      str(fb_jk))
 
 print()
 print("=" * 70)
@@ -969,13 +1108,13 @@ asset_ids = sorted({c["asset_id"] for c in cards})
 bad_char, bad_bg = [], []
 for aid in asset_ids:
     for kind, bucket in (("member_character", bad_char), ("member_background", bad_bg)):
-        url = f"https://assets.bdon.moe/zh-Hans/MemberCard/{aid}/{kind}/{kind}.webp"
+        url = f"https://haneoka.org/assets/intl/Assets/AddressableResources/MemberCard/{aid}/{kind}.png"
         try:
             req = urllib.request.Request(url, headers=HEADERS)
             with urllib.request.urlopen(req, timeout=25) as r:
-                magic = r.read(4)
-            if magic != b"RIFF":
-                bucket.append((aid, kind, "not-webp"))
+                magic = r.read(8)
+            if magic != b"\x89PNG\r\n\x1a\n":
+                bucket.append((aid, kind, "not-png"))
         except Exception as e:
             bucket.append((aid, kind, repr(e)[:60]))
 check(f"all {len(asset_ids)} card 立绘 downloadable", not bad_char, str(bad_char[:5]))
@@ -983,16 +1122,46 @@ check(f"all {len(asset_ids)} card 背景 downloadable", not bad_bg, str(bad_bg[:
 
 jacket_bad = []
 for s in songs[:12]:
-    url = f"https://assets.bdon.moe/zh-Hans/Image/Jacket/{s['jacket']}/{s['jacket']}.webp"
+    url = f"https://haneoka.org/assets/intl/Assets/AddressableResources/Image/Jacket/{s['jacket']}.png"
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=25) as r:
+            magic = r.read(8)
+        if magic != b"\x89PNG\r\n\x1a\n":
+            jacket_bad.append((s["jacket"], "not-png"))
+    except Exception as e:
+        jacket_bad.append((s["jacket"], repr(e)[:60]))
+check("sampled 12 jackets downloadable", not jacket_bad, str(jacket_bad[:5]))
+
+# 备选源 bdon.moe 必须同样可用（主源抽风时靠它兜底）
+mirror_bad = []
+sample_ids = asset_ids[:6] + asset_ids[-6:]
+for aid in sample_ids:
+    for kind in ("member_character", "member_background"):
+        url = f"https://assets.bdon.moe/zh-Hans/MemberCard/{aid}/{kind}/{kind}.webp"
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=25) as r:
+                magic = r.read(4)
+            if magic != b"RIFF":
+                mirror_bad.append((aid, kind, "not-webp"))
+        except Exception as e:
+            mirror_bad.append((aid, kind, repr(e)[:60]))
+check(f"mirror serves {len(sample_ids)*2} card assets", not mirror_bad, str(mirror_bad[:5]))
+
+mirror_jacket_bad = []
+for s in songs[:12]:
+    j = s["jacket"]
+    url = f"https://assets.bdon.moe/zh-Hans/Image/Jacket/{j}/{j}.webp"
     try:
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=25) as r:
             magic = r.read(4)
         if magic != b"RIFF":
-            jacket_bad.append((s["jacket"], "not-webp"))
+            mirror_jacket_bad.append((j, "not-webp"))
     except Exception as e:
-        jacket_bad.append((s["jacket"], repr(e)[:60]))
-check("sampled 12 jackets downloadable", not jacket_bad, str(jacket_bad[:5]))
+        mirror_jacket_bad.append((j, repr(e)[:60]))
+check("mirror serves sampled 12 jackets", not mirror_jacket_bad, str(mirror_jacket_bad[:5]))
 
 print()
 print("=" * 70)

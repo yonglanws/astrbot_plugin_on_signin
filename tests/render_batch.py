@@ -68,6 +68,32 @@ def fetch_bytes(url: str, timeout: int = 30) -> bytes:
         return r.read()
 
 
+def fetch_asset(urls, timeout: int = 30) -> bytes:
+    """多源下载：按顺序尝试，全部失败才抛异常（与插件逻辑一致）"""
+    last = None
+    for u in urls:
+        try:
+            return fetch_bytes(u, timeout)
+        except Exception as e:
+            last = e
+    raise last
+
+
+def card_urls(asset_id: int, kind: str):
+    """主源 haneoka（扁平 png），备选 bdon.moe（嵌套 webp）"""
+    return [
+        f"https://haneoka.org/assets/intl/Assets/AddressableResources/MemberCard/{asset_id}/{kind}.png",
+        f"https://assets.bdon.moe/zh-Hans/MemberCard/{asset_id}/{kind}/{kind}.webp",
+    ]
+
+
+def jacket_url(jacket: str):
+    return [
+        f"https://haneoka.org/assets/intl/Assets/AddressableResources/Image/Jacket/{jacket}.png",
+        f"https://assets.bdon.moe/zh-Hans/Image/Jacket/{jacket}/{jacket}.webp",
+    ]
+
+
 def to_data_uri(data: bytes, max_size: int, quality: int) -> str:
     from PIL import Image
     img = Image.open(io.BytesIO(data))
@@ -105,17 +131,12 @@ async def render_one(idx, card, songs, font_b64, manifest, rng):
     # 保证两首难度接近
     picks = plugin_main.select_song_with_difficulty(songs)[:2]
 
-    char_uri = to_data_uri(fetch_bytes(
-        f"https://assets.bdon.moe/zh-Hans/MemberCard/{card['asset_id']}/member_character/member_character.webp"),
-        1440, 80)
-    bg_uri = to_data_uri(fetch_bytes(
-        f"https://assets.bdon.moe/zh-Hans/MemberCard/{card['asset_id']}/member_background/member_background.webp"),
-        1440, 80)
+    char_uri = to_data_uri(fetch_asset(card_urls(card['asset_id'], "member_character")), 1440, 80)
+    bg_uri = to_data_uri(fetch_asset(card_urls(card['asset_id'], "member_background")), 1440, 80)
     covers = []
     for p in picks:
         try:
-            covers.append(to_data_uri(fetch_bytes(
-                f"https://assets.bdon.moe/zh-Hans/Image/Jacket/{p['jacket']}/{p['jacket']}.webp"), 200, 60))
+            covers.append(to_data_uri(fetch_asset(jacket_url(p['jacket'])), 200, 60))
         except Exception:
             covers.append("")
     while len(covers) < 2:

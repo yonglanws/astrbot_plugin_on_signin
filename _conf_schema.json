@@ -20,7 +20,7 @@
     "download_timeout": {
         "description": "云端图片下载超时（秒）",
         "type": "int",
-        "hint": "单张图片下载的最长等待时间。超时后该图层留空并继续渲染，不会阻塞签到；网络较差时可适当调大",
-        "default": 12
+        "hint": "单次下载尝试的最长等待时间。图片有 haneoka.org 主源与 assets.bdon.moe 备选源，单源失败会自动重试并切换源；网络很差时可调到 25~30",
+        "default": 20
     }
 }

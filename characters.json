@@ -61,7 +61,7 @@
   "characterId": 4,
   "name": "soyo",
   "fullName": "長崎 そよ",
-  "fullNameChinese": "长崎爽世",
+  "fullNameChinese": "长崎素世",
   "fullNameTraditional": "長崎爽世",
   "fullNameEnglish": "Soyo Nagasaki",
   "shortName": "爽世",
@@ -72,9 +72,13 @@
   "aliases": [
    "soyo",
    "そよ",
+   "爽世",
    "素世",
    "長崎そよ",
-   "長崎素世"
+   "長崎爽世",
+   "長崎素世",
+   "长崎爽世",
+   "长崎素世"
   ]
  },
  {

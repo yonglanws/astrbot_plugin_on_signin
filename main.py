@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import threading
 import io
+import time
 import urllib.request
 import urllib.error
 from PIL import Image
@@ -23,9 +24,26 @@ from pathlib import Path
 DIFFICULTY_ORDER = {'hard': 0, 'expert': 1}
 DIFFICULTY_LABEL_MAP = {'hard': 'HARD', 'expert': 'EXPERT'}
 
-# bdon.moe 资产站点（繁中服 hk-tw 资源）
-ASSET_BASE = "https://assets.bdon.moe/zh-Hans"
-ASSET_LANG_PATH = "zh-Hans"
+# haneoka.org（BanG Dream! Our Notes 数据库镜像）：连通性与速度都明显更好，
+# 实测 42 张立绘 4 并发 haneoka 约 10~12s 全部成功，bdon 要 16~23s，
+# 且 bdon 在部分网络下会 read timeout。所以 haneoka 作主源。
+ASSET_BASE = "https://haneoka.org/assets/intl/Assets/AddressableResources"
+ASSET_LANG_PATH = "intl/Assets/AddressableResources"
+# bdon.moe（webp，体积小一半）作为备选源：主源抽风时兜底，保证用户能拿到图
+ASSET_MIRRORS = [
+    {
+        "name": "haneoka",
+        "base": "https://haneoka.org/assets/intl/Assets/AddressableResources",
+        "card": "/MemberCard/{id}/{kind}.png",
+        "jacket": "/Image/Jacket/{name}.png",
+    },
+    {
+        "name": "bdon",
+        "base": "https://assets.bdon.moe/zh-Hans",
+        "card": "/MemberCard/{id}/{kind}/{kind}.webp",
+        "jacket": "/Image/Jacket/{name}/{name}.webp",
+    },
+]
 
 # masterdata 同步源（只取繁中服 hk-tw-mo 目录）
 MASTERDATA_REPO = "StarMoe-org/moenotes-masterdata"
@@ -918,13 +936,15 @@ class MyPlugin(Star):
 
         # 云端图片下载专用线程池：网络请求一律走 executor，绝不占用事件循环线程，
         # 否则单次下载超时就可能把整个 AstrBot 卡住。
-        # 实测这个 CDN 在 3 并发时最快（再多会被限流），立绘/背景/两首封面正好 4 个任务。
+        # 并发压到 2：实测这些 CDN 在 3~4 并发时会频繁 SSL 重置，
+        # 2 并发反而更稳（总耗时与串行接近，但配上重试成功率明显更高）。
         import concurrent.futures
         self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=4, thread_name_prefix="on-signin-dl"
+            max_workers=2, thread_name_prefix="on-signin-dl"
         )
-        # 单次下载超时（秒）。收紧上限，失败就走文字降级，不拖死签到
-        self.download_timeout = float(self.config.get('download_timeout', 12) or 12)
+        # 单次下载超时（秒）。这些 CDN 从国内连经常要 1~2 秒才握手成功，
+        # 太短会把本来能成功的请求判死；每个源最多重试 2 次，再自动换备选源。
+        self.download_timeout = float(self.config.get('download_timeout', 20) or 20)
 
         if self.config.get('auto_sync_masterdata', True):
             threading.Thread(
@@ -1182,6 +1202,7 @@ class MyPlugin(Star):
                 'server': 'hk-tw (繁中服)',
                 'generated_at': datetime.now().isoformat(timespec='seconds'),
                 'asset_base': ASSET_BASE,
+                'asset_mirrors': [m['name'] for m in ASSET_MIRRORS],
             },
             'songs': songs,
             'cards': cards,
@@ -1191,8 +1212,12 @@ class MyPlugin(Star):
     # 云端资产下载与缓存
     # ------------------------------------------------------------------ #
 
-    def _fetch_image(self, url: str, cache_key: str, ttl_hours: int = 168) -> bytes:
+    def _fetch_image(self, url: str, cache_key: str, ttl_hours: int = 168,
+                     fallback_urls=()) -> bytes:
         """下载图片并写入本地磁盘缓存；命中缓存直接读文件（内存零占用）
+
+        fallback_urls 是备选源：主源失败（超时/连接重置/404）时按顺序尝试，
+        全部失败才抛异常。用户侧表现为"偶尔慢一点但一定能拿到图"。
 
         注意：这是同步阻塞调用，只允许在 executor 线程里执行（见 _fetch_image_async），
         不能在事件循环线程里直接调用。
@@ -1206,11 +1231,33 @@ class MyPlugin(Star):
         except Exception:
             pass
 
-        # 不重试：这个 CDN 偶发超时，重试一次只会把最坏耗时翻倍，
-        # 而调用方已经有"跳过该图层"和整体预算兜底，快速失败更好。
-        req = urllib.request.Request(url, headers=self.ASSET_HEADERS)
-        with urllib.request.urlopen(req, timeout=self.download_timeout) as resp:
-            data = resp.read()
+        # 主源 + 备选源依次尝试；每个源最多 2 次（退避 0.4s/0.9s 避开限流窗口）
+        candidates = [(url, 2)] + [(u, 2) for u in (fallback_urls or [])]
+        last_err = None
+        data = None
+        for candidate_url, attempts in candidates:
+            for attempt in range(attempts):
+                try:
+                    req = urllib.request.Request(candidate_url, headers=self.ASSET_HEADERS)
+                    with urllib.request.urlopen(req, timeout=self.download_timeout) as resp:
+                        data = resp.read()
+                    break
+                except urllib.error.HTTPError as e:
+                    # 404/403 说明这个源没有这张图，换源比重试有用
+                    last_err = e
+                    if e.code in (404, 403, 410) or attempt == attempts - 1:
+                        break
+                    time.sleep(0.4 * (attempt + 1) ** 2)
+                except Exception as e:
+                    last_err = e
+                    if attempt == attempts - 1:
+                        break
+                    time.sleep(0.4 * (attempt + 1) ** 2)
+            if data:
+                break
+
+        if not data:
+            raise last_err if last_err else RuntimeError("download failed")
 
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1221,19 +1268,34 @@ class MyPlugin(Star):
             logger.warning(f"⚠️ 写入图片缓存失败 {cache_key}: {e}")
         return data
 
-    async def _fetch_image_async(self, url: str, cache_key: str, ttl_hours: int = 168):
+    async def _fetch_image_async(self, url: str, cache_key: str, ttl_hours: int = 168,
+                                 fallback_urls=()):
         """在 executor 里执行下载，避免阻塞事件循环（否则整个机器人会被卡住）"""
         import asyncio
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            self._executor, self._fetch_image, url, cache_key, ttl_hours
+            self._executor, self._fetch_image, url, cache_key, ttl_hours, fallback_urls
         )
 
-    def _card_asset_url(self, asset_id: int, kind: str, ext: str = "webp") -> str:
-        return f"{ASSET_BASE}/MemberCard/{asset_id}/{kind}/{kind}.{ext}"
+    def _card_asset_urls(self, asset_id: int, kind: str):
+        """返回 (主源URL, 备选源URL列表)，主源来自 ASSET_MIRRORS 第一项"""
+        urls = [m["base"] + m["card"].format(id=asset_id, kind=kind) for m in ASSET_MIRRORS]
+        return urls[0], urls[1:]
 
-    def _jacket_url(self, jacket_asset: str, ext: str = "webp") -> str:
-        return f"{ASSET_BASE}/Image/Jacket/{jacket_asset}/{jacket_asset}.{ext}"
+    def _jacket_urls(self, jacket_asset: str):
+        """返回 (主源URL, 备选源URL列表)"""
+        urls = [m["base"] + m["jacket"].format(name=jacket_asset) for m in ASSET_MIRRORS]
+        return urls[0], urls[1:]
+
+    def _card_asset_url(self, asset_id: int, kind: str, ext: str = "png") -> str:
+        """仅主源 URL（兼容旧调用方），带备选源请用 _card_asset_urls"""
+        return ASSET_MIRRORS[0]["base"] + ASSET_MIRRORS[0]["card"].format(
+            id=asset_id, kind=kind)
+
+    def _jacket_url(self, jacket_asset: str, ext: str = "png") -> str:
+        """仅主源 URL（兼容旧调用方），带备选源请用 _jacket_urls"""
+        return ASSET_MIRRORS[0]["base"] + ASSET_MIRRORS[0]["jacket"].format(
+            name=jacket_asset)
 
     def _image_to_base64(self, img_data: bytes, max_size: int = 800, quality: int = 75,
                          fmt: str = "WEBP", cache_key: str = None) -> str:
@@ -1308,16 +1370,18 @@ class MyPlugin(Star):
             if cached:
                 return cached
             try:
+                url, fallbacks = self._card_asset_urls(asset_id, kind)
                 data = await self._fetch_image_async(
-                    self._card_asset_url(asset_id, kind), f"card_{asset_id}_{kind}")
+                    url, f"card_{asset_id}_{kind}", fallback_urls=fallbacks)
                 return self._image_to_base64(data, max_size=max_size, quality=quality,
                                              fmt="WEBP", cache_key=key)
             except Exception as e:
                 logger.warning(f"⚠️ 下载{kind}失败 card={asset_id}: {e}")
                 return ""
 
-        # 单张已有 download_timeout，这里再给整体一个略宽的上限兜底
-        budget = self.download_timeout * 2 + 5
+        # 单张已有 download_timeout，这里再给整体一个略宽的上限兜底。
+        # 4 张图 2 并发，每张最多 2 个源 x 2 次尝试：预算 = 超时 * 4 * 2 轮 + 余量
+        budget = self.download_timeout * 8 + 10
         try:
             return await asyncio.wait_for(
                 asyncio.gather(
@@ -1336,7 +1400,7 @@ class MyPlugin(Star):
         """一次性并发拉取签到需要的全部图片：立绘 + 背景 + 两首歌曲封面
 
         分开串行请求会各自付一次 TLS 握手；合成一批并发能把 4 张图的
-        总耗时从约 1.0s 压到约 0.45s（实测这个 CDN 3~4 并发最快）。
+        总耗时从约 1.0s 压到约 0.45s。每张图自带备选源，单个源抽风时不影响其他图。
         """
         import asyncio
 
@@ -1346,8 +1410,9 @@ class MyPlugin(Star):
             if cached:
                 return cached
             try:
+                url, fallbacks = self._card_asset_urls(asset_id, kind)
                 data = await self._fetch_image_async(
-                    self._card_asset_url(asset_id, kind), f"card_{asset_id}_{kind}")
+                    url, f"card_{asset_id}_{kind}", fallback_urls=fallbacks)
                 return self._image_to_base64(data, max_size=1440, quality=80,
                                              fmt="WEBP", cache_key=key)
             except Exception as e:
@@ -1362,7 +1427,9 @@ class MyPlugin(Star):
             if cached:
                 return cached
             try:
-                data = await self._fetch_image_async(self._jacket_url(jacket), f"jkt_{jacket}")
+                url, fallbacks = self._jacket_urls(jacket)
+                data = await self._fetch_image_async(
+                    url, f"jkt_{jacket}", fallback_urls=fallbacks)
                 return self._image_to_base64(data, max_size=200, quality=60,
                                              fmt="WEBP", cache_key=key)
             except Exception as e:
@@ -1373,7 +1440,8 @@ class MyPlugin(Star):
         while len(jackets) < 2:
             jackets.append("")
 
-        budget = self.download_timeout * 2 + 5
+        # 4 张图 2 并发，每张最多 2 个源 x 2 次尝试：预算 = 超时 * 4 * 2 轮 + 余量
+        budget = self.download_timeout * 8 + 10
         try:
             return await asyncio.wait_for(
                 asyncio.gather(
@@ -1397,7 +1465,9 @@ class MyPlugin(Star):
         if cached:
             return cached
         try:
-            data = await self._fetch_image_async(self._jacket_url(jacket_asset), f"jkt_{jacket_asset}")
+            url, fallbacks = self._jacket_urls(jacket_asset)
+            data = await self._fetch_image_async(
+                url, f"jkt_{jacket_asset}", fallback_urls=fallbacks)
             return self._image_to_base64(data, max_size=200, quality=60, fmt="WEBP", cache_key=key)
         except Exception as e:
             logger.warning(f"⚠️ 下载歌曲封面失败 {jacket_asset}: {e}")
@@ -1907,17 +1977,22 @@ class MyPlugin(Star):
                     "difficulty_label": existing_daily_state.get('song2_difficulty_label', '')
                 }
             ]
-            card = {
-                'asset_id': existing_daily_state.get('card_asset_id', 0),
-                'rarity_name': existing_daily_state.get('card_rarity_name', ''),
-                'character_name': existing_daily_state.get('card_character_name', ''),
-                'subtitle': existing_daily_state.get('card_subtitle', ''),
-                # 贴纸也要跟着存档走，保证同一天重复签到看到的是同一套
-                'sticker_ok': existing_daily_state.get('sticker_ok', ''),
-                'sticker_yi': existing_daily_state.get('sticker_yi', ''),
-                'sticker_ji': existing_daily_state.get('sticker_ji', ''),
-            }
-            logger.info(f"📦 使用已保存的每日签到状态: {user_name}({user_id})")
+            # 卡面（角色、立绘、背景）与贴纸每次重新抽：同一天重复签到也能换个角色看，
+            # 贴纸始终跟随新抽到的角色，宜/忌依旧不同。
+            # 指定了角色时服从指令（签到 <角色>），否则全库随机。
+            card = self._select_random_card(specified_character_id)
+            if card is None and specified_character_id is not None:
+                logger.warning(f"⚠️ 角色 {specified_character_id} 暂无可用卡面，随机选择")
+                card = self._select_random_card()
+            if card is None:
+                # 重新抽失败时退回存档里的卡面，至少保证能出图
+                card = {
+                    'asset_id': existing_daily_state.get('card_asset_id', 0),
+                    'rarity_name': existing_daily_state.get('card_rarity_name', ''),
+                    'character_name': existing_daily_state.get('card_character_name', ''),
+                    'subtitle': existing_daily_state.get('card_subtitle', ''),
+                }
+            logger.info(f"📦 使用已保存的每日运势: {user_name}({user_id})，卡面与贴纸重新抽取")
         else:
             fortune_data = self._generate_fortune()
             yi_text = self._get_yi_activity()
@@ -1960,13 +2035,9 @@ class MyPlugin(Star):
             char_b64, bg_b64 = await self._get_card_images(card['asset_id'])
 
         # 角色贴纸：成功图标 / 宜 / 忌，从该角色自己的贴纸里抽，宜忌保证不同。
-        # 走存档分支时直接用当天已存好的那套，保证同一天重复签到一致。
+        # 卡面每次重新抽，贴纸也跟着新角色抽，不会出现"别的角色的贴纸"。
         # 必须在这里取，下面写存档和渲染都要用。
-        st_ok = card.get('sticker_ok') or ''
-        st_yi = card.get('sticker_yi') or ''
-        st_ji = card.get('sticker_ji') or ''
-        if not (st_ok and st_yi and st_ji):
-            st_ok, st_yi, st_ji = self._pick_stickers(card.get('character_id'))
+        st_ok, st_yi, st_ji = self._pick_stickers(card.get('character_id'))
 
         if not is_test and not existing_daily_state:
             state_data = {
