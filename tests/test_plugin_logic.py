@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import os
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -691,6 +692,258 @@ finally:
     plugin_main.urllib.request.urlopen = orig_urlopen
 
 check("overall budget derived from download_timeout", "download_timeout * 2" in src_main)
+
+print()
+print("=" * 70)
+print("TEST 5d: 角色贴纸分配（宜/忌必须不同）")
+print("=" * 70)
+sticker_manifest_path = PLUGIN_DIR / "data" / "stickers.json"
+sticker_dir = PLUGIN_DIR / "data" / "stickers"
+check("sticker manifest shipped", sticker_manifest_path.exists(), str(sticker_manifest_path))
+check("sticker image dir shipped", sticker_dir.exists() and len(list(sticker_dir.glob("*.webp"))) > 0)
+
+if sticker_manifest_path.exists():
+    smanifest = json.loads(sticker_manifest_path.read_text(encoding="utf-8"))
+    check("stickers cover all 25 characters", len(smanifest) == 25, str(len(smanifest)))
+    check("every character has at least 2 stickers",
+          all(len(v.get("stickers", [])) >= 2 for v in smanifest.values()),
+          str([k for k, v in smanifest.items() if len(v.get("stickers", [])) < 2]))
+    total_stickers = sum(len(v["stickers"]) for v in smanifest.values())
+    check("57 stickers total", total_stickers == 57, str(total_stickers))
+    check("sticker files all exist",
+          all((sticker_dir / s["file"]).exists() for v in smanifest.values() for s in v["stickers"]))
+    # 每个角色的贴纸文件名必须互不相同
+    check("sticker filenames unique per character",
+          all(len({s["file"] for s in v["stickers"]}) == len(v["stickers"]) for v in smanifest.values()))
+
+    # 用真实插件实例验证 _load_stickers + _pick_stickers
+    inst_s = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+    inst_s.plugin_dir = PLUGIN_DIR
+    inst_s.cache_dir = Path(tempfile.mkdtemp(prefix="on_signin_st_")) / "cache"
+    inst_s._load_stickers()
+    check("stickers loaded for 25 characters", len(inst_s.stickers) == 25, str(len(inst_s.stickers)))
+    check("_pick_stickers exists", hasattr(inst_s, "_pick_stickers"))
+    check("__init__ calls _load_stickers",
+          "_load_stickers()" in src_main[src_main.index("def __init__(self, context"):src_main.index("# 数据加载与同步")])
+
+    # 抽取规则：每个角色抽 300 次
+    violations = []
+    for cid, pool in inst_s.stickers.items():
+        n = len(pool)
+        for _ in range(300):
+            ok, yi, ji = inst_s._pick_stickers(cid)
+            if yi == ji:
+                violations.append((cid, "宜=忌")); break
+            if n >= 3 and not (ok != yi and ok != ji and yi != ji):
+                violations.append((cid, "3张未全不同")); break
+            if not all(v in pool for v in (ok, yi, ji)):
+                violations.append((cid, "抽出池外")); break
+    check("宜/忌 always different across all characters", not violations, str(violations[:5]))
+
+    # 3 张的角色：三个位置必须两两不同
+    three = [cid for cid, p in inst_s.stickers.items() if len(p) >= 3]
+    check("7 characters have 3 stickers", len(three) == 7, str(three))
+    triple_viol = []
+    for cid in three:
+        for _ in range(200):
+            ok, yi, ji = inst_s._pick_stickers(cid)
+            if not (ok != yi and ok != ji and yi != ji):
+                triple_viol.append(cid); break
+    check("3-sticker characters always yield 3 distinct", not triple_viol, str(triple_viol))
+
+    # 2 张的角色：宜/忌不同（成功图标可重复）
+    two = [cid for cid, p in inst_s.stickers.items() if len(p) == 2]
+    check("18 characters have 2 stickers", len(two) == 18, str(len(two)))
+    two_viol = [cid for cid in two for _ in range(200)
+                if (lambda r: r[1] == r[2])(inst_s._pick_stickers(cid))]
+    check("2-sticker characters always yield distinct 宜/忌", not two_viol, str(two_viol[:5]))
+
+    # 无贴纸角色返回空
+    check("unknown character returns empty stickers",
+          inst_s._pick_stickers(99999) == ("", "", ""))
+
+    # 渲染数据必须用贴纸，并且模板三个占位符都在
+    check("render uses picked stickers", '"b64ok": st_ok' in src_main)
+    check("saved-state stickers preferred", "card.get('sticker_ok')" in src_main)
+    check("stickers persisted in daily state",
+          "'sticker_ok': st_ok" in src_main and "'sticker_yi': st_yi" in src_main)
+    check("daily state restores stickers", "existing_daily_state.get('sticker_ok'" in src_main)
+    check("DB has sticker columns",
+          all(c in src_main for c in ("sticker_ok TEXT", '("sticker_ok", "TEXT")')))
+
+    # 立绘仅下移不缩小：高度保持 142%，bottom 负值加大
+    import re as _re2
+    m2 = _re2.search(r"\.character-layer img \{(.*?)\}", src_main, _re2.S)
+    if m2:
+        rule2 = m2.group(1)
+        h2 = _re2.search(r"height:\s*([\d.]+)%", rule2)
+        b2 = _re2.search(r"bottom:\s*(-?[\d.]+)%", rule2)
+        check("character height stays enlarged (142%)", h2 and float(h2.group(1)) == 142.0, rule2.strip()[:160])
+        check("character shifted down (bottom <= -22%)", b2 and float(b2.group(1)) <= -22.0, rule2.strip()[:160])
+
+    # 贴纸略微缩小
+    m3 = _re2.search(r"\.fortune-icon img \{(.*?)\}", src_main, _re2.S)
+    if m3:
+        sc2 = _re2.search(r"transform:\s*scale\(([\d.]+)\)", m3.group(1))
+        check("sticker scale reduced below 1.28", sc2 and float(sc2.group(1)) < 1.28, m3.group(1).strip()[:160])
+    m4 = _re2.search(r"\.success-icon img \{(.*?)\}", src_main, _re2.S)
+    if m4:
+        sc3 = _re2.search(r"transform:\s*scale\(([\d.]+)\)", m4.group(1))
+        check("success icon scale reduced below 1.18", sc3 and float(sc3.group(1)) < 1.18, m4.group(1).strip()[:160])
+
+print()
+print("=" * 70)
+print("TEST 5c: 字体完整性 + 已编码缓存 + 批量并发下载")
+print("=" * 70)
+# 1) 字体必须是完整 ttf，不能子集化（子集会丢字形导致回退系统字体）
+check("full MiSans font shipped", (PLUGIN_DIR / "MiSans-Medium.ttf").exists())
+check("no subset font shipped (would drop glyphs)",
+      not (PLUGIN_DIR / "data" / "MiSans-Subset.woff2").exists())
+inst_f = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst_f.plugin_dir = PLUGIN_DIR
+inst_f._load_font()
+check("font_format is truetype (full font)", inst_f.font_format == "truetype", inst_f.font_format)
+check("full font base64 loaded (>1MB)", len(inst_f.base64_font) > 1_000_000,
+      f"{len(inst_f.base64_font)//1024} KB")
+check("template uses static truetype font-face",
+      "format('truetype')" in src_main and "{{font_mime}}" not in src_main)
+
+# 2) 已编码缓存：第二次不再走下载/编码
+tmp_ec = Path(tempfile.mkdtemp(prefix="on_signin_ec_"))
+inst_e = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst_e.cache_dir = tmp_ec / "cache"
+inst_e.download_timeout = 3
+inst_e._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+inst_e.data_dir = tmp_ec
+inst_e.master_dir = tmp_ec / "masterdata"
+inst_e._sync_lock = threading.Lock()
+inst_e._sync_state = {"last_sync": None, "running": False}
+
+png = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+calls = {"n": 0}
+
+
+def _counting_urlopen(req, timeout=None):
+    calls["n"] += 1
+    class _C:
+        def read(self, *a): return png
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    return _C()
+
+
+orig3 = plugin_main.urllib.request.urlopen
+plugin_main.urllib.request.urlopen = _counting_urlopen
+try:
+    r1 = asyncio.run(inst_e._get_card_images(63))
+    n_after_first = calls["n"]
+    r2 = asyncio.run(inst_e._get_card_images(63))
+    n_after_second = calls["n"]
+    check("first call performs downloads", n_after_first > 0, str(n_after_first))
+    check("second call makes zero network requests", n_after_second == n_after_first,
+          f"{n_after_first} -> {n_after_second}")
+    check("cached result identical", r1 == r2, f"{str(r1)[:40]} vs {str(r2)[:40]}")
+    check("encoded cache written to disk",
+          (tmp_ec / "cache" / "encoded").exists()
+          and len(list((tmp_ec / "cache" / "encoded").glob("*.txt"))) >= 2)
+except Exception as e:
+    check("encoded cache round trip", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig3
+
+# 3) 批量并发下载：一次拿回 立绘/背景/两首封面（用全新实例，避免命中前面已写的缓存）
+tmp_pf = Path(tempfile.mkdtemp(prefix="on_signin_pf_"))
+inst_p = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst_p.cache_dir = tmp_pf / "cache"
+inst_p.download_timeout = 3
+inst_p._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+inst_p.data_dir = tmp_pf
+inst_p.master_dir = tmp_pf / "masterdata"
+inst_p._sync_lock = threading.Lock()
+inst_p._sync_state = {"last_sync": None, "running": False}
+
+calls2 = {"n": 0}
+def _counting2(req, timeout=None):
+    calls2["n"] += 1
+    class _C:
+        def read(self, *a): return png
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    return _C()
+
+plugin_main.urllib.request.urlopen = _counting2
+try:
+    res = asyncio.run(inst_p.prefetch_signin_assets(63, ["jkt_001_100001", "jkt_002_100043"]))
+    n1 = calls2["n"]
+    check("prefetch returns 4 values", len(res) == 4, str(len(res)))
+    check("prefetch issues 4 concurrent requests", n1 == 4, str(n1))
+    check("prefetch result is 2 card layers + 2 covers",
+          all(isinstance(v, str) for v in res) and all(v.startswith("data:image/") for v in res),
+          str([v[:20] for v in res]))
+    res2 = asyncio.run(inst_p.prefetch_signin_assets(63, ["jkt_001_100001", "jkt_002_100043"]))
+    n2 = calls2["n"]
+    check("second prefetch fully cached", n2 == n1, f"{n1} -> {n2}")
+    check("prefetch cached result identical", res == res2)
+except Exception as e:
+    check("prefetch batch download", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig3
+
+# 4) 封面为空 / 不足两首时也要能兜住
+plugin_main.urllib.request.urlopen = _counting_urlopen
+try:
+    r_none = asyncio.run(inst_p.prefetch_signin_assets(63, []))
+    check("prefetch with no jackets still returns 4", len(r_none) == 4, str(len(r_none)))
+    check("prefetch with no jackets yields empty covers", r_none[2] == "" and r_none[3] == "",
+          str(r_none[2:]))
+    r_one = asyncio.run(inst_p.prefetch_signin_assets(63, ["jkt_001_100001"]))
+    check("prefetch with one jacket fills the other slot", len(r_one) == 4 and r_one[3] == "",
+          str([v[:16] for v in r_one]))
+except Exception as e:
+    check("prefetch edge cases", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig3
+
+# 5) 批量下载超时同样被预算兜住（不会无限等待）
+inst_h = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst_h.cache_dir = tmp_ec / "cacheH"
+inst_h.download_timeout = 1.0
+inst_h._executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+inst_h.data_dir = tmp_ec
+inst_h.master_dir = tmp_ec / "masterdata"
+inst_h._sync_lock = threading.Lock()
+inst_h._sync_state = {"last_sync": None, "running": False}
+
+def _hang_urlopen(req, timeout=None):
+    class _Hang:
+        def read(self, *a):
+            import time
+            time.sleep(120)
+            return b""
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    return _Hang()
+
+plugin_main.urllib.request.urlopen = _hang_urlopen
+try:
+    async def _p():
+        t0 = asyncio.get_running_loop().time()
+        r = await inst_h.prefetch_signin_assets(63, ["jkt_001_100001", "jkt_002_100043"])
+        return r, asyncio.get_running_loop().time() - t0
+    r, el = asyncio.run(asyncio.wait_for(_p(), timeout=30))
+    check("prefetch bounded by budget on hang", el < 12, f"{el:.1f}s")
+    check("prefetch returns 4 empties on hang", r == ("", "", "", ""), str(r))
+except Exception as e:
+    check("prefetch bounded by budget on hang", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig3
+
+# 6) 下载不重试（重试会让最坏耗时翻倍，快速失败更好）
+check("download does not retry (fail fast)", "for attempt in range(2)" not in src_main)
+
+# 7) 不再发送 keep-alive：实测该 CDN 复用连接会超时
+check("no keep-alive header (CDN closes idle conns)", '"Connection": "keep-alive"' not in src_main)
 
 print()
 print("=" * 70)

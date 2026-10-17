@@ -1,0 +1,355 @@
+{
+ "6": {
+  "character": "Doloris / 三角初华",
+  "stickers": [
+   {
+    "name": "初华的表情1",
+    "file": "6_1.webp"
+   },
+   {
+    "name": "初华的表情2",
+    "file": "6_2.webp"
+   },
+   {
+    "name": "抓紧我",
+    "file": "6_3.webp"
+   }
+  ]
+ },
+ "10": {
+  "character": "Oblivionis / 丰川祥子",
+  "stickers": [
+   {
+    "name": "盯",
+    "file": "10_1.webp"
+   },
+   {
+    "name": "祥子的表情1",
+    "file": "10_2.webp"
+   },
+   {
+    "name": "祥子的表情2",
+    "file": "10_3.webp"
+   }
+  ]
+ },
+ "11": {
+  "character": "仲町阿拉蕾",
+  "stickers": [
+   {
+    "name": "阿拉蕾的表情1",
+    "file": "11_1.webp"
+   },
+   {
+    "name": "阿拉蕾的表情2",
+    "file": "11_2.webp"
+   }
+  ]
+ },
+ "17": {
+  "character": "伊泽枣",
+  "stickers": [
+   {
+    "name": "枣的表情1",
+    "file": "17_1.webp"
+   },
+   {
+    "name": "枣的表情2",
+    "file": "17_2.webp"
+   }
+  ]
+ },
+ "8": {
+  "character": "Timoris / 八幡海铃",
+  "stickers": [
+   {
+    "name": "我开动了",
+    "file": "8_1.webp"
+   },
+   {
+    "name": "海铃的表情1",
+    "file": "8_2.webp"
+   },
+   {
+    "name": "海铃的表情2",
+    "file": "8_3.webp"
+   }
+  ]
+ },
+ "2": {
+  "character": "千早爱音",
+  "stickers": [
+   {
+    "name": "爱音的表情1",
+    "file": "2_1.webp"
+   },
+   {
+    "name": "爱音的表情2",
+    "file": "2_2.webp"
+   }
+  ]
+ },
+ "15": {
+  "character": "千石由乃",
+  "stickers": [
+   {
+    "name": "爱的奔流 AtoZ 奖励表情",
+    "file": "15_1.webp"
+   },
+   {
+    "name": "由乃的表情1",
+    "file": "15_2.webp"
+   },
+   {
+    "name": "由乃的表情2",
+    "file": "15_3.webp"
+   }
+  ]
+ },
+ "20": {
+  "character": "和泉朋花",
+  "stickers": [
+   {
+    "name": "朋花的表情1",
+    "file": "20_1.webp"
+   },
+   {
+    "name": "朋花的表情2",
+    "file": "20_2.webp"
+   }
+  ]
+ },
+ "25": {
+  "character": "四宫宁月",
+  "stickers": [
+   {
+    "name": "宁月的表情1",
+    "file": "25_1.webp"
+   },
+   {
+    "name": "宁月的表情2",
+    "file": "25_2.webp"
+   }
+  ]
+ },
+ "12": {
+  "character": "宫永野乃花",
+  "stickers": [
+   {
+    "name": "野乃花的表情1",
+    "file": "12_1.webp"
+   },
+   {
+    "name": "野乃花的表情2",
+    "file": "12_2.webp"
+   }
+  ]
+ },
+ "13": {
+  "character": "峰月律",
+  "stickers": [
+   {
+    "name": "律的表情1",
+    "file": "13_1.webp"
+   },
+   {
+    "name": "律的表情2",
+    "file": "13_2.webp"
+   }
+  ]
+ },
+ "24": {
+  "character": "梅里千樱梨",
+  "stickers": [
+   {
+    "name": "千樱梨的表情1",
+    "file": "24_1.webp"
+   },
+   {
+    "name": "千樱梨的表情2",
+    "file": "24_2.webp"
+   }
+  ]
+ },
+ "5": {
+  "character": "椎名立希",
+  "stickers": [
+   {
+    "name": "立希的表情1",
+    "file": "5_1.webp"
+   },
+   {
+    "name": "立希的表情2",
+    "file": "5_2.webp"
+   }
+  ]
+ },
+ "16": {
+  "character": "汐见萤",
+  "stickers": [
+   {
+    "name": "萤的表情1",
+    "file": "16_1.webp"
+   },
+   {
+    "name": "萤的表情2",
+    "file": "16_2.webp"
+   }
+  ]
+ },
+ "19": {
+  "character": "滨崎茉幌",
+  "stickers": [
+   {
+    "name": "茉幌的表情1",
+    "file": "19_1.webp"
+   },
+   {
+    "name": "茉幌的表情2",
+    "file": "19_2.webp"
+   }
+  ]
+ },
+ "18": {
+  "character": "琴平凪",
+  "stickers": [
+   {
+    "name": "凪的表情1",
+    "file": "18_1.webp"
+   },
+   {
+    "name": "凪的表情2",
+    "file": "18_2.webp"
+   },
+   {
+    "name": "拜托了，倾心一掷 奖励表情",
+    "file": "18_3.webp"
+   }
+  ]
+ },
+ "23": {
+  "character": "矢仓蓬咲",
+  "stickers": [
+   {
+    "name": "蓬咲的表情1",
+    "file": "23_1.webp"
+   },
+   {
+    "name": "蓬咲的表情2",
+    "file": "23_2.webp"
+   }
+  ]
+ },
+ "9": {
+  "character": "Amoris / 祐天寺若麦",
+  "stickers": [
+   {
+    "name": "若麦的表情1",
+    "file": "9_1.webp"
+   },
+   {
+    "name": "若麦的表情2",
+    "file": "9_2.webp"
+   },
+   {
+    "name": "这样如何？",
+    "file": "9_3.webp"
+   }
+  ]
+ },
+ "7": {
+  "character": "Mortis / 若叶睦",
+  "stickers": [
+   {
+    "name": "熟睡中",
+    "file": "7_1.webp"
+   },
+   {
+    "name": "睦的表情1",
+    "file": "7_2.webp"
+   },
+   {
+    "name": "睦的表情2",
+    "file": "7_3.webp"
+   }
+  ]
+ },
+ "14": {
+  "character": "藤都子",
+  "stickers": [
+   {
+    "name": "都子的表情1",
+    "file": "14_1.webp"
+   },
+   {
+    "name": "都子的表情2",
+    "file": "14_2.webp"
+   }
+  ]
+ },
+ "3": {
+  "character": "要乐奈",
+  "stickers": [
+   {
+    "name": "乐奈的表情1",
+    "file": "3_1.webp"
+   },
+   {
+    "name": "乐奈的表情2",
+    "file": "3_2.webp"
+   }
+  ]
+ },
+ "4": {
+  "character": "长崎爽世",
+  "stickers": [
+   {
+    "name": "爽世的表情1",
+    "file": "4_1.webp"
+   },
+   {
+    "name": "爽世的表情2",
+    "file": "4_2.webp"
+   }
+  ]
+ },
+ "21": {
+  "character": "须贺蕾叶",
+  "stickers": [
+   {
+    "name": "蕾叶的表情1",
+    "file": "21_1.webp"
+   },
+   {
+    "name": "蕾叶的表情2",
+    "file": "21_2.webp"
+   }
+  ]
+ },
+ "22": {
+  "character": "马桥心玖",
+  "stickers": [
+   {
+    "name": "心玖的表情1",
+    "file": "22_1.webp"
+   },
+   {
+    "name": "心玖的表情2",
+    "file": "22_2.webp"
+   }
+  ]
+ },
+ "1": {
+  "character": "高松灯",
+  "stickers": [
+   {
+    "name": "灯的表情1",
+    "file": "1_1.webp"
+   },
+   {
+    "name": "灯的表情2",
+    "file": "1_2.webp"
+   }
+  ]
+ }
+}

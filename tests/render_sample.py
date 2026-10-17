@@ -28,6 +28,7 @@ OUT_DIR = PLUGIN_DIR / "out"
 
 FONT_PATH = PLUGIN_DIR / "MiSans-Medium.ttf"
 
+
 # Stub astrbot so main.py imports (we only need its pure helpers + TMPL)
 import types
 for name in ["astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.star",
@@ -170,6 +171,28 @@ def main():
         font_b64 = base64.b64encode(FONT_PATH.read_bytes()).decode("utf-8")
         print(f"🔤 字体 {len(font_b64)//1024} KB (base64)")
 
+    # 角色贴纸：成功图标 / 宜 / 忌（宜忌必须不同）
+    st_ok = st_yi = st_ji = ""
+    manifest_path = PLUGIN_DIR / "data" / "stickers.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = manifest.get(str(card.get("character_id")))
+        if entry and entry.get("stickers"):
+            uris = []
+            for st in entry["stickers"]:
+                f = PLUGIN_DIR / "data" / "stickers" / st["file"]
+                if f.exists():
+                    uris.append(to_data_uri(f.read_bytes(), max_size=320, quality=72))
+            if len(uris) >= 3:
+                random.shuffle(uris)
+                st_ok, st_yi, st_ji = uris[0], uris[1], uris[2]
+            elif len(uris) == 2:
+                st_yi, st_ji = uris[0], uris[1]
+                st_ok = random.choice(uris)
+            elif uris:
+                st_ok = st_yi = st_ji = uris[0]
+            print(f"🎴 贴纸 {len(uris)} 张（宜/忌{'不同 ✅' if st_yi != st_ji else '相同 ❌'}）")
+
     rarity_class = {"SR": "sr", "SSR": "ssr", "BD": "bd"}.get(card["rarity_name"], "sr")
 
     render_data = {
@@ -177,7 +200,7 @@ def main():
         "base64_font": font_b64,
         "b64bg": bg_uri,
         "b64char": char_uri,
-        "b64ok": "", "b64yi": "", "b64ji": "",
+        "b64ok": st_ok, "b64yi": st_yi, "b64ji": st_ji,
         "fortune_level": "大吉",
         "fortune_desc": "最最顺!😎",
         "fortune_color": "good",

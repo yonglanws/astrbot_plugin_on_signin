@@ -223,3 +223,6 @@ signin_data.json.bak
 config.json
 cache/
 masterdata/
+
+# 本地贴纸源文件（已转换为 data/stickers/ 下的 webp，无需入库）
+BDON/

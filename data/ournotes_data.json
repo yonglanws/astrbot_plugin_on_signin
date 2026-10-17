@@ -2,7 +2,7 @@
  "meta": {
   "source": "https://github.com/StarMoe-org/moenotes-masterdata/tree/main/hk-tw-mo",
   "server": "hk-tw (繁中服)",
-  "generated_at": "2026-10-17T17:45:01",
+  "generated_at": "2026-10-17T19:04:28",
   "asset_base": "https://assets.bdon.moe/zh-Hans"
  },
  "songs": [
@@ -2430,7 +2430,7 @@
    "arranger": "藤田淳平（Elements Garden）",
    "band_ids": [],
    "band_names": [],
-   "artist": "高松灯 / 长崎爽世 / 椎名立希 / Mortis / 若叶睦 / Oblivionis / 丰川祥子",
+   "artist": "高松灯 / 长崎爽世 / 椎名立希",
    "music_type": 4,
    "difficulties": {
     "hard": {
