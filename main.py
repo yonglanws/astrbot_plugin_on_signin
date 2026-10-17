@@ -54,6 +54,11 @@ def _format_level(value):
     return ('%g' % value)
 
 
+async def _empty_cover():
+    """占位协程：没有歌曲时返回空封面"""
+    return ""
+
+
 def _secure_random_choice(items):
     """使用加密级随机数生成器进行公平选择"""
     if not items:
@@ -910,6 +915,15 @@ class MyPlugin(Star):
         self._sync_state = {'last_sync': None, 'running': False}
         self._load_sync_state()
 
+        # 云端图片下载专用线程池：网络请求一律走 executor，绝不占用事件循环线程，
+        # 否则单次下载超时就可能把整个 AstrBot 卡住
+        import concurrent.futures
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=6, thread_name_prefix="on-signin-dl"
+        )
+        # 单次下载超时（秒）。收紧上限，失败就走文字降级，不拖死签到
+        self.download_timeout = float(self.config.get('download_timeout', 12) or 12)
+
         if self.config.get('auto_sync_masterdata', True):
             threading.Thread(
                 target=self._maybe_sync_masterdata,
@@ -1164,7 +1178,11 @@ class MyPlugin(Star):
     # ------------------------------------------------------------------ #
 
     def _fetch_image(self, url: str, cache_key: str, ttl_hours: int = 168) -> bytes:
-        """下载图片并写入本地磁盘缓存；命中缓存直接读文件（内存零占用）"""
+        """下载图片并写入本地磁盘缓存；命中缓存直接读文件（内存零占用）
+
+        注意：这是同步阻塞调用，只允许在 executor 线程里执行（见 _fetch_image_async），
+        不能在事件循环线程里直接调用。
+        """
         cache_path = self.cache_dir / f"{cache_key}.bin"
         try:
             if cache_path.exists():
@@ -1174,9 +1192,21 @@ class MyPlugin(Star):
         except Exception:
             pass
 
-        req = urllib.request.Request(url, headers=self.ASSET_HEADERS)
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = resp.read()
+        last_err = None
+        # 只在连接/读取阶段重试，超时上限收紧，避免长时间占住 executor
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(url, headers=self.ASSET_HEADERS)
+                with urllib.request.urlopen(req, timeout=self.download_timeout) as resp:
+                    data = resp.read()
+                break
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    continue
+                raise
+        else:
+            raise last_err if last_err else RuntimeError("download failed")
 
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1186,6 +1216,14 @@ class MyPlugin(Star):
         except Exception as e:
             logger.warning(f"⚠️ 写入图片缓存失败 {cache_key}: {e}")
         return data
+
+    async def _fetch_image_async(self, url: str, cache_key: str, ttl_hours: int = 168):
+        """在 executor 里执行下载，避免阻塞事件循环（否则整个机器人会被卡住）"""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor, self._fetch_image, url, cache_key, ttl_hours
+        )
 
     def _card_asset_url(self, asset_id: int, kind: str, ext: str = "webp") -> str:
         return f"{ASSET_BASE}/MemberCard/{asset_id}/{kind}/{kind}.{ext}"
@@ -1215,30 +1253,44 @@ class MyPlugin(Star):
             logger.warning(f"图片压缩失败，使用原始数据: {e}")
             return f"data:image/png;base64,{base64.b64encode(img_data).decode('utf-8')}"
 
-    def _get_card_images(self, asset_id: int):
-        """下载指定卡面的立绘与背景（带本地缓存），返回 base64 data URI"""
-        char_b64 = ""
-        bg_b64 = ""
+    async def _get_card_images(self, asset_id: int):
+        """下载指定卡面的立绘与背景（带本地缓存），返回 base64 data URI
+
+        立绘与背景并行下载；单个失败只让对应图层留空，不影响其余部分渲染。
+        整体加一层时间上限，避免 CDN 抽风时把签到流程拖住。
+        """
+        import asyncio
+
+        async def _one(kind: str, max_size: int, quality: int):
+            try:
+                data = await self._fetch_image_async(
+                    self._card_asset_url(asset_id, kind), f"card_{asset_id}_{kind}")
+                return self._image_to_base64(data, max_size=max_size, quality=quality, fmt="WEBP")
+            except Exception as e:
+                logger.warning(f"⚠️ 下载{kind}失败 card={asset_id}: {e}")
+                return ""
+
+        # 单张已有 download_timeout，这里再给整体一个略宽的上限兜底
+        budget = self.download_timeout * 2 + 5
         try:
-            data = self._fetch_image(self._card_asset_url(asset_id, "member_character"), f"card_{asset_id}_char")
-            char_b64 = self._image_to_base64(data, max_size=1920, quality=88, fmt="WEBP")
-        except Exception as e:
-            logger.warning(f"⚠️ 下载立绘失败 card={asset_id}: {e}")
-
-        try:
-            data = self._fetch_image(self._card_asset_url(asset_id, "member_background"), f"card_{asset_id}_bg")
-            bg_b64 = self._image_to_base64(data, max_size=1920, quality=88, fmt="WEBP")
-        except Exception as e:
-            logger.warning(f"⚠️ 下载背景失败 card={asset_id}: {e}")
-
-        return char_b64, bg_b64
-
-    def _get_song_cover(self, jacket_asset: str) -> str:
+            return await asyncio.wait_for(
+                asyncio.gather(
+                    # 源图本身只有 1440x1920，最终又要压到 ~100KB，
+                    # 这里用 1440 / quality 80 兼顾放大后的清晰度与 HTML 体积
+                    _one("member_character", 1440, 80),
+                    _one("member_background", 1440, 80),
+                ),
+                timeout=budget,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ 卡面 {asset_id} 下载超时（{budget:.0f}s），本次跳过图片层")
+            return "", ""
+    async def _get_song_cover(self, jacket_asset: str) -> str:
         """下载歌曲封面（带本地缓存）并转为 base64"""
         if not jacket_asset:
             return ""
         try:
-            data = self._fetch_image(self._jacket_url(jacket_asset), f"jkt_{jacket_asset}")
+            data = await self._fetch_image_async(self._jacket_url(jacket_asset), f"jkt_{jacket_asset}")
             return self._image_to_base64(data, max_size=200, quality=60, fmt="WEBP")
         except Exception as e:
             logger.warning(f"⚠️ 下载歌曲封面失败 {jacket_asset}: {e}")
@@ -1396,8 +1448,8 @@ class MyPlugin(Star):
             return None
         return _secure_random_choice(self.cards)
 
-    def _get_random_song(self):
-        """使用难度相似性算法选择两首歌曲"""
+    async def _get_random_song(self):
+        """使用难度相似性算法选择两首歌曲（封面并行下载）"""
         if not self.songs:
             return [
                 {"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
@@ -1411,14 +1463,19 @@ class MyPlugin(Star):
         if len(selected_songs) < 2:
             selected_songs = selected_songs + [selected_songs[0] if selected_songs else None] * (2 - len(selected_songs))
 
+        import asyncio
+        picks = selected_songs[:2]
+        covers = await asyncio.gather(*(
+            self._get_song_cover(s.get('jacket', '')) if s else _empty_cover()
+            for s in picks
+        ))
+
         result = []
-        for song in selected_songs[:2]:
+        for song, cover_base64 in zip(picks, covers):
             if song is None:
                 result.append({"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
                                "difficulty_type": None, "difficulty_level": None, "difficulty_label": None})
                 continue
-
-            cover_base64 = self._get_song_cover(song.get('jacket', ''))
 
             title = song.get('title') or song.get('title_ja') or '未知歌曲'
             artist = song.get('artist') or song.get('composer') or ''
@@ -1680,7 +1737,7 @@ class MyPlugin(Star):
             ji_text = self._get_ji_activity()
 
             try:
-                songs = self._get_random_song()
+                songs = await self._get_random_song()
             except Exception as e:
                 logger.warning(f"获取推荐歌曲失败: {e}")
                 songs = None
@@ -1695,13 +1752,7 @@ class MyPlugin(Star):
             yield event.plain_result("⚠️ 签到失败：卡面数据加载异常，请联系管理员")
             return
 
-        char_b64 = ""
-        bg_b64 = ""
-        if not is_test:
-            char_b64, bg_b64 = self._get_card_images(card['asset_id'])
-        else:
-            # 测试签到也走缓存下载，但不落库
-            char_b64, bg_b64 = self._get_card_images(card['asset_id'])
+        char_b64, bg_b64 = await self._get_card_images(card['asset_id'])
 
         if not is_test and not existing_daily_state:
             state_data = {
@@ -1916,6 +1967,12 @@ class MyPlugin(Star):
                 logger.info("✅ SQLite数据库连接已关闭")
             except Exception as e:
                 logger.warning(f"关闭数据库连接失败: {e}")
+        if getattr(self, '_executor', None):
+            try:
+                self._executor.shutdown(wait=False, cancel_futures=True)
+                logger.info("✅ 图片下载线程池已关闭")
+            except Exception as e:
+                logger.warning(f"关闭下载线程池失败: {e}")
         logger.info("OurNotes 签到插件已停止")
 
 

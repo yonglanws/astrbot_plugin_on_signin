@@ -485,6 +485,215 @@ old.close()
 
 print()
 print("=" * 70)
+print("TEST 5b: 云端下载不走事件循环 + 超时/失败不卡死签到")
+print("=" * 70)
+import asyncio
+import concurrent.futures
+import inspect
+
+# 1) 下载链路必须是 async + executor，不能同步阻塞
+check("_fetch_image is sync (executor-only)", not inspect.iscoroutinefunction(plugin_main.MyPlugin._fetch_image))
+check("_fetch_image_async exists", hasattr(plugin_main.MyPlugin, "_fetch_image_async"))
+check("_fetch_image_async is a coroutine function",
+      inspect.iscoroutinefunction(plugin_main.MyPlugin._fetch_image_async))
+check("_get_card_images is async", inspect.iscoroutinefunction(plugin_main.MyPlugin._get_card_images))
+check("_get_song_cover is async", inspect.iscoroutinefunction(plugin_main.MyPlugin._get_song_cover))
+check("_get_random_song is async", inspect.iscoroutinefunction(plugin_main.MyPlugin._get_random_song))
+check("_fetch_image_async delegates to run_in_executor",
+      "run_in_executor" in inspect.getsource(plugin_main.MyPlugin._fetch_image_async))
+
+# 2) __init__ 必须创建 executor 与超时配置
+src_main = (PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
+check("executor created in __init__", "ThreadPoolExecutor" in src_main)
+check("download_timeout configured", "download_timeout" in src_main)
+check("terminate shuts executor down", "shutdown(wait=False, cancel_futures=True)" in src_main)
+
+# 3) 事件循环在下载期间必须保持响应（这是"整个 astrbot 卡死"的根因回归测试）
+tmp_inst_dir = Path(tempfile.mkdtemp(prefix="on_signin_async_"))
+inst3 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst3.cache_dir = tmp_inst_dir / "cache"
+inst3.download_timeout = 1.5
+inst3._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+inst3.data_dir = tmp_inst_dir
+inst3.master_dir = tmp_inst_dir / "masterdata"
+inst3._sync_lock = threading.Lock()
+inst3._sync_state = {"last_sync": None, "running": False}
+
+
+class _SlowConn:
+    """模拟一个 read 卡住的连接；按 timeout 参数抛 TimeoutError（真实 socket 行为）"""
+    def __init__(self, timeout=None):
+        self._t = timeout or 12
+
+    def read(self, *a):
+        import time
+        time.sleep(min(self._t + 0.2, 3.0))  # 超过 timeout 即视为超时
+        raise TimeoutError("The read operation timed out")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _slow_urlopen(req, timeout=None):
+    return _SlowConn(timeout)
+
+
+orig_urlopen = plugin_main.urllib.request.urlopen
+plugin_main.urllib.request.urlopen = _slow_urlopen
+try:
+    async def _probe():
+        # 并发发起的慢请求不应阻塞事件循环
+        t0 = asyncio.get_running_loop().time()
+        tasks = [inst3._get_card_images(63), inst3._get_card_images(64)]
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=8)
+        elapsed = asyncio.get_running_loop().time() - t0
+        return results, elapsed
+
+    results, elapsed = asyncio.run(_probe())
+    flat = [tuple(r) if isinstance(r, (list, tuple)) else r for r in results]
+    check("slow downloads return empty layers instead of raising",
+          flat == [("", ""), ("", "")], str(results))
+    check("event loop stayed responsive (gather finished, no deadlock)", elapsed < 8, f"{elapsed:.2f}s")
+except Exception as e:
+    check("slow downloads degrade gracefully", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+# 4) 单张下载失败不影响另一张（立绘失败仍应有背景）
+inst4 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst4.cache_dir = tmp_inst_dir / "cache2"
+inst4.download_timeout = 2
+inst4._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+inst4.data_dir = tmp_inst_dir
+inst4.master_dir = tmp_inst_dir / "masterdata"
+inst4._sync_lock = threading.Lock()
+inst4._sync_state = {"last_sync": None, "running": False}
+
+# 预置背景缓存，立绘强制失败
+(tmp_inst_dir / "cache2").mkdir(parents=True, exist_ok=True)
+png = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+(tmp_inst_dir / "cache2" / "card_63_member_background.bin").write_bytes(png)
+
+
+def _half_urlopen(req, timeout=None):
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    if "member_character" in url:
+        raise TimeoutError("The read operation timed out")
+    return _Ctx(png)
+
+
+class _Ctx:
+    def __init__(self, data): self._d = data
+    def read(self, *a): return self._d
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+
+orig2 = plugin_main.urllib.request.urlopen
+plugin_main.urllib.request.urlopen = _half_urlopen
+try:
+    ch, bg = asyncio.run(inst4._get_card_images(63))
+    check("failed 立绘 degrades to empty", ch == "", repr(ch)[:80])
+    check("cached 背景 still renders", bg.startswith("data:image/"), repr(bg)[:60])
+except Exception as e:
+    check("partial failure handled", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig2
+
+# 5) 封面失败返回空串而不是抛异常
+inst5 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst5.cache_dir = tmp_inst_dir / "cache3"
+inst5.download_timeout = 1
+inst5._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst5.data_dir = tmp_inst_dir
+inst5.master_dir = tmp_inst_dir / "masterdata"
+inst5._sync_lock = threading.Lock()
+inst5._sync_state = {"last_sync": None, "running": False}
+plugin_main.urllib.request.urlopen = _slow_urlopen
+try:
+    cover = asyncio.run(inst5._get_song_cover("jkt_001_100001"))
+    check("song cover failure returns empty string", cover == "", repr(cover)[:80])
+except Exception as e:
+    check("song cover failure handled", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+# 6) _get_random_song 在封面全失败时仍返回两首歌（不抛异常）
+inst6 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst6.cache_dir = tmp_inst_dir / "cache4"
+inst6.download_timeout = 1
+inst6._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst6.data_dir = tmp_inst_dir
+inst6.master_dir = tmp_inst_dir / "masterdata"
+inst6._sync_lock = threading.Lock()
+inst6._sync_state = {"last_sync": None, "running": False}
+inst6.songs = songs
+inst6.cards = cards
+inst6._cards_by_character = {}
+plugin_main.urllib.request.urlopen = _slow_urlopen
+try:
+    picks = asyncio.run(asyncio.wait_for(inst6._get_random_song(), timeout=10))
+    check("song picks survive cover failures", len(picks) == 2, str(len(picks)))
+    check("cover fields empty on failure", all(p["cover_base64"] == "" for p in picks))
+    check("song metadata still present",
+          all(p["name_cn"] and p["difficulty_type"] in ("hard", "expert") for p in picks),
+          str([(p["name_cn"], p["difficulty_type"]) for p in picks]))
+except Exception as e:
+    check("song picks survive cover failures", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+# 7) 空歌曲库不应崩溃
+inst7 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst7.songs = []
+empty_picks = asyncio.run(inst7._get_random_song())
+check("empty song library returns 2 placeholders", len(empty_picks) == 2, str(len(empty_picks)))
+
+# 8) 整体时间预算：即使单张请求无限卡住，_get_card_images 也必须在预算内返回
+inst8 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8.cache_dir = tmp_inst_dir / "cache8"
+inst8.download_timeout = 1.0          # 预算 = 1.0*2+5 = 7s
+inst8._executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+inst8.data_dir = tmp_inst_dir
+inst8.master_dir = tmp_inst_dir / "masterdata"
+inst8._sync_lock = threading.Lock()
+inst8._sync_state = {"last_sync": None, "running": False}
+
+
+def _hang_urlopen(req, timeout=None):
+    class _Hang:
+        def read(self, *a):
+            import time
+            time.sleep(120)   # 远超任何预算
+            return b""
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    return _Hang()
+
+
+plugin_main.urllib.request.urlopen = _hang_urlopen
+try:
+    async def _budget_probe():
+        t0 = asyncio.get_running_loop().time()
+        r = await inst8._get_card_images(63)
+        return r, asyncio.get_running_loop().time() - t0
+
+    res, el = asyncio.run(asyncio.wait_for(_budget_probe(), timeout=30))
+    check("hanging download bounded by overall budget", el < 12, f"{el:.1f}s")
+    check("bounded download returns empty layers", res == ("", ""), str(res))
+except Exception as e:
+    check("hanging download bounded by overall budget", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+check("overall budget derived from download_timeout", "download_timeout * 2" in src_main)
+
+print()
+print("=" * 70)
 print("TEST 6: Cloud asset URL construction")
 print("=" * 70)
 check("card character URL pattern",

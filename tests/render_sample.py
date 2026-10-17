@@ -141,10 +141,10 @@ def main():
     print("⬇️ 下载立绘 / 背景 ...")
     char_uri = to_data_uri(
         fetch_bytes(f"https://assets.bdon.moe/zh-Hans/MemberCard/{card['asset_id']}/member_character/member_character.webp"),
-        max_size=1920, quality=88)
+        max_size=1440, quality=80)
     bg_uri = to_data_uri(
         fetch_bytes(f"https://assets.bdon.moe/zh-Hans/MemberCard/{card['asset_id']}/member_background/member_background.webp"),
-        max_size=1920, quality=88)
+        max_size=1440, quality=80)
     print(f"   立绘 data-uri {len(char_uri)//1024} KB, 背景 data-uri {len(bg_uri)//1024} KB")
 
     # 选两首难度相近的歌

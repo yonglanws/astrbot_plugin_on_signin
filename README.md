@@ -73,6 +73,7 @@ plugin_data/astrbot_plugin_on_signin/
 | `sign_in_command` | string | `签到` | 触发指令 |
 | `history_keep_days` | int | `365` | 签到历史保留天数，过期数据每日自动清理 |
 | `auto_sync_masterdata` | bool | `true` | 是否每天自动同步 master 数据 |
+| `download_timeout` | int | `12` | 单张云端图片下载超时（秒） |
 
 在 AstrBot WebUI 插件设置页面修改后重载即可。
 
@@ -98,7 +99,13 @@ plugin_data/astrbot_plugin_on_signin/
 ## 常见问题
 
 **Q: 图片显示不出来？**
-A: 检查网络能否访问 `assets.bdon.moe`。下载失败会自动降级为文字版签到。
+A: 检查网络能否访问 `assets.bdon.moe`。单张图片下载失败只让对应图层留空，签到本身照常完成；
+全部失败时降级为文字版签到。CDN 偶发超时是正常的，图片有 7 天本地缓存，不会每次重新下载。
+
+**Q: 某张卡面下载超时，机器人没反应了？**
+A: 已修复。所有云端请求都走独立线程池，不在事件循环线程里同步等待；单张有
+`download_timeout`（默认 12 秒）上限，整个卡面下载还有一层 `download_timeout * 2 + 5` 秒的
+整体预算兜底。超时后跳过图片层继续渲染，不会再阻塞其他指令。
 
 **Q: 数据是实时的吗？**
 A: master 数据每天同步一次，发送 `同步卡面数据` 可立即同步。图片本身每次按需下载并缓存 7 天。

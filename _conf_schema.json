@@ -16,5 +16,11 @@
         "type": "bool",
         "hint": "开启后每天自动从 GitHub 拉取繁中服（hk-tw-mo）最新 master 文件，同步歌曲名、难度与新增卡面。也可随时发送「同步卡面数据」手动触发",
         "default": true
+    },
+    "download_timeout": {
+        "description": "云端图片下载超时（秒）",
+        "type": "int",
+        "hint": "单张图片下载的最长等待时间。超时后该图层留空并继续渲染，不会阻塞签到；网络较差时可适当调大",
+        "default": 12
     }
 }
