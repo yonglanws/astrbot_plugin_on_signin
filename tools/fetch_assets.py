@@ -151,25 +151,33 @@ def main():
     ap.add_argument("--cooldown", type=float, default=2.0)
     ap.add_argument("--rounds", type=int, default=6,
                     help="整体重试几轮。前几轮剩下的顽固文件留到后面再试")
+    ap.add_argument("--only", default="", choices=("", "cards", "jackets"),
+                    help="只抓某一类，便于和多台机器分工")
     args = ap.parse_args()
 
     with open(args.data, encoding="utf-8") as f:
         data = json.load(f)
 
     jobs = []
-    for card in data.get("cards", []):
-        cid = card.get("asset_id")
-        if not cid:
-            continue
-        for kind in ("member_character", "member_background"):
-            urls = [s["base"] + s["card"].format(id=cid, kind=kind) for s in SOURCES]
-            jobs.append((f"cards/{cid}_{kind}", urls))
-    jackets = sorted({(s.get("jacket") or s.get("jacket_asset"))
-                      for s in data.get("songs", [])
-                      if (s.get("jacket") or s.get("jacket_asset"))})
-    for jk in jackets:
-        urls = [s["base"] + s["jacket"].format(name=jk) for s in SOURCES]
-        jobs.append((f"jackets/{jk}", urls))
+    jobs = []
+    want = args.only          # "" = 全部；"jackets" = 只要封面；"cards" = 只要立绘/背景
+    if want in ("", "cards"):
+        for card in data.get("cards", []):
+            cid = card.get("asset_id")
+            if not cid:
+                continue
+            for kind in ("member_character", "member_background"):
+                urls = [s["base"] + s["card"].format(id=cid, kind=kind) for s in SOURCES]
+                jobs.append((f"cards/{cid}_{kind}", urls))
+    if want in ("", "jackets"):
+        jackets = sorted({(s.get("jacket") or s.get("jacket_asset"))
+                          for s in data.get("songs", [])
+                          if (s.get("jacket") or s.get("jacket_asset"))})
+        for jk in jackets:
+            urls = [s["base"] + s["jacket"].format(name=jk) for s in SOURCES]
+            jobs.append((f"jackets/{jk}", urls))
+    else:
+        jackets = []
 
     total = len(jobs)
     print(f"共 {total} 个文件（立绘/背景 {total - len(jackets)}，曲绘 {len(jackets)}）",
