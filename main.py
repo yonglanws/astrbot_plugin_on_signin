@@ -60,6 +60,10 @@ MASTERDATA_FILES = [
 
 RARITY_NAME = {2: 'R', 3: 'SR', 4: 'SSR', 20: 'BD'}
 
+# 测试签到（不记录、不走持久化状态）的冷却时间：它会跑完整的取图 + 渲染链路，
+# 不设限的话任何人都能拿它当免费出图接口反复刷。
+TEST_SIGNIN_COOLDOWN = 30.0
+
 
 def _format_level(value):
     """把难度数值格式化为展示文本：19.0 -> "19"，25.5 -> "25.5" """
@@ -72,17 +76,49 @@ def _format_level(value):
     return ('%g' % value)
 
 
-async def _empty_cover():
-    """占位协程：没有歌曲时返回空封面"""
-    return ""
-
-
 def _secure_random_choice(items):
     """使用加密级随机数生成器进行公平选择"""
     if not items:
         return None
     secure_index = secrets.randbelow(len(items))
     return items[secure_index]
+
+
+# 各稀有度的抽取权重。SR 的卡面数量远多于 SSR（27 : 14），
+# 直接等概率抽会让 SR 的出现几率接近 SSR 的两倍，所以按稀有度归一化：
+# 先按权重选中稀有度，再在该稀有度内等概率抽一张。
+RARITY_WEIGHTS = {
+    'SSR': 10,
+    'SR': 10,
+    'BD': 2,
+}
+
+
+def _weighted_random_card(cards):
+    """按稀有度加权抽卡：SR 与 SSR 的出现概率相同，BD 更稀有
+
+    权重相同时退化成"每个稀有度等概率"，与该稀有度有多少张卡无关。
+    """
+    if not cards:
+        return None
+    by_rarity = {}
+    for card in cards:
+        key = (card.get('rarity_name') or '').strip().upper() or 'SR'
+        by_rarity.setdefault(key, []).append(card)
+    if len(by_rarity) == 1:
+        return _secure_random_choice(next(iter(by_rarity.values())))
+    rarities = list(by_rarity)
+    weights = [RARITY_WEIGHTS.get(r, RARITY_WEIGHTS['SR']) for r in rarities]
+    total = sum(weights)
+    if total <= 0:
+        return _secure_random_choice(cards)
+    pick = secrets.randbelow(total)
+    acc = 0
+    for rarity, weight in zip(rarities, weights):
+        acc += weight
+        if pick < acc:
+            return _secure_random_choice(by_rarity[rarity])
+    return _secure_random_choice(by_rarity[rarities[-1]])
 
 
 def select_song_with_difficulty(songs, first_difficulty_type=None, first_difficulty_level=None):
@@ -935,6 +971,8 @@ class MyPlugin(Star):
         self._image_cache_lock = threading.Lock()
         self._sync_state = {'last_sync': None, 'running': False}
         self._load_sync_state()
+        # 测试签到的最近触发时间（ctx_id -> 时间戳），防止它被当成免费渲染接口反复刷
+        self._test_signin_last = {}
 
         # 云端图片下载专用线程池：网络请求一律走 executor，绝不占用事件循环线程，
         # 否则单次下载超时就可能把整个 AstrBot 卡住。
@@ -1037,6 +1075,35 @@ class MyPlugin(Star):
         except Exception as e:
             logger.warning(f"⚠️ 保存同步状态失败: {e}")
 
+    @staticmethod
+    def _load_master_table(path) -> dict:
+        """读一份 master 表；文件不存在或内容损坏（半截 JSON）时返回 None
+
+        增量同步靠"文件存在"判断要不要重下，所以损坏必须在这里就被识别成"没有"，
+        否则一张坏表会永久缺失，而且 MasterText 缺失时只会静默产空文案。
+        """
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _atomic_write(path, text: str):
+        """先写临时文件再原子替换，避免中途失败留下半个文件"""
+        tmp = Path(f"{path}.tmp")
+        try:
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.write(text)
+            tmp.replace(path)
+        except Exception:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+            raise
+
     def _maybe_sync_masterdata(self):
         """每天最多同步一次 masterdata（后台线程执行，不阻塞插件加载）"""
         today = datetime.now().strftime("%Y-%m-%d")
@@ -1065,14 +1132,10 @@ class MyPlugin(Star):
             for filename in MASTERDATA_FILES:
                 local_path = self.master_dir / filename
                 url = f"https://api.github.com/repos/{MASTERDATA_REPO}/contents/{MASTERDATA_PATH}/{filename}?ref={MASTERDATA_BRANCH}"
-                if not force and local_path.exists():
+                if not force and self._load_master_table(local_path) is not None:
                     # 增量模式：已有文件直接复用，避免每天重复下载大文件
-                    try:
-                        with open(local_path, 'r', encoding='utf-8') as f:
-                            tables[filename[:-5]] = json.load(f)
-                        continue
-                    except Exception:
-                        pass
+                    tables[filename[:-5]] = self._load_master_table(local_path)
+                    continue
                 try:
                     req = urllib.request.Request(url, headers={
                         "User-Agent": "Mozilla/5.0",
@@ -1081,27 +1144,30 @@ class MyPlugin(Star):
                     with urllib.request.urlopen(req, timeout=120) as resp:
                         payload = resp.read()
                     data = json.loads(payload.decode('utf-8'))
-                    with open(local_path, 'w', encoding='utf-8') as f:
-                        f.write(payload.decode('utf-8'))
+                    # 先写临时文件再替换：直接 open('w') 会在进程被杀时留下 0 字节/半截
+                    # JSON，而增量模式只认"文件存在"，坏文件会让这张表永久缺失。
+                    self._atomic_write(local_path, payload.decode('utf-8'))
                     tables[filename[:-5]] = data
                     logger.info(f"⬇️ 已同步 {filename} ({len(payload) // 1024} KB)")
                 except Exception as e:
                     logger.warning(f"⚠️ 同步 {filename} 失败: {e}")
-                    if local_path.exists():
-                        try:
-                            with open(local_path, 'r', encoding='utf-8') as f:
-                                tables[filename[:-5]] = json.load(f)
-                        except Exception:
-                            pass
+                    # 本地有旧文件就兜底复用；复用前同样要能解析，坏文件直接当没有
+                    stale = self._load_master_table(local_path)
+                    if stale is not None:
+                        tables[filename[:-5]] = stale
 
-            if not tables.get('MasterLiveMusic') or not tables.get('MasterMemberCard'):
-                logger.warning("⚠️ masterdata 不完整，跳过重建数据集")
+            required = ('MasterLiveMusic', 'MasterMemberCard', 'MasterText')
+            missing = [name for name in required if not tables.get(name)]
+            if missing:
+                # MasterText 是全部标题/角色名/乐队名的来源，缺了它会产出一片空文案的
+                # 数据集，比同步失败更难发现，所以和其他必需表一样直接判失败。
+                logger.warning(f"⚠️ masterdata 不完整，跳过重建数据集（缺: {', '.join(missing)}）")
                 return False
 
             dataset = self._build_dataset(tables)
             out_path = self.data_dir / "ournotes_data.json"
-            with open(out_path, 'w', encoding='utf-8') as f:
-                json.dump(dataset, f, ensure_ascii=False, indent=1)
+            # 同样是原子写：半截数据集会在下次启动时被当成有效数据加载
+            self._atomic_write(out_path, json.dumps(dataset, ensure_ascii=False, indent=1))
 
             self._sync_state['last_sync'] = datetime.now().isoformat(timespec='seconds')
             self._save_sync_state()
@@ -1152,26 +1218,50 @@ class MyPlugin(Star):
         return t
 
     def _download_missing_assets(self, missing_cards, missing_jackets):
-        """后台补齐缺图；失败的留着不管，下次同步会再试"""
+        """后台补齐缺图；失败的留着不管，下次同步会再试
+
+        走独立的补下载线程池：签到用的池只有 2 个 worker，首次运行一次性要补
+        一百多个文件，共用池会把用户签到全部堵在队列后面。
+        另外每个任务都套一层超时——executor 里已经在跑的线程无法被取消，
+        超时的下载会继续占着 worker，没上限的话几次超时就能把池占满。
+        """
+        import concurrent.futures
+        pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=2, thread_name_prefix="on-signin-backfill")
+        # 单张图最坏 2 源 x 2 次尝试，加上退避 sleep；按 download_timeout 折算
+        per_file_budget = max(30.0, self.download_timeout * 5 + 10)
         done = 0
-        for cid, kind in missing_cards:
-            try:
+        try:
+            def _card_job(item):
+                cid, kind = item
                 url, fallbacks = self._card_asset_urls(cid, kind)
                 self._fetch_image(url, f"card_{cid}_{kind}", fallback_urls=fallbacks,
                                   local_names=self._card_local_names(cid, kind),
                                   target_subdir="cards")
-                done += 1
-            except Exception as e:
-                logger.warning(f"⚠️ 补下载立绘/背景失败 card={cid} {kind}: {e}")
-        for jk in missing_jackets:
-            try:
+
+            def _jacket_job(jk):
                 url, fallbacks = self._jacket_urls(jk)
                 self._fetch_image(url, f"jkt_{jk}", fallback_urls=fallbacks,
                                   local_names=self._jacket_local_names(jk),
                                   target_subdir="jackets")
-                done += 1
-            except Exception as e:
-                logger.warning(f"⚠️ 补下载封面失败 {jk}: {e}")
+
+            jobs = [(f"card={cid} {kind}", _card_job, (cid, kind))
+                    for cid, kind in missing_cards]
+            jobs += [(jk, _jacket_job, (jk,)) for jk in missing_jackets]
+
+            for label, fn, args in jobs:
+                # args 是单个元组参数，不能 * 展开——_card_job 要的是 (cid, kind) 一个元组
+                future = pool.submit(fn, args)
+                try:
+                    future.result(timeout=per_file_budget)
+                    done += 1
+                except concurrent.futures.TimeoutError:
+                    # 线程取消不掉，只能把它丢掉；它跑完会把图写进 assets，下次就不缺了
+                    logger.warning(f"⚠️ 补下载超时，跳过 {label}（{per_file_budget:.0f}s）")
+                except Exception as e:
+                    logger.warning(f"⚠️ 补下载失败 {label}: {e}")
+        finally:
+            pool.shutdown(wait=False)
         if done:
             logger.info(f"✅ 后台补下载完成：{done} 个文件")
 
@@ -1370,9 +1460,10 @@ class MyPlugin(Star):
                 age = datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)
                 if age < timedelta(hours=ttl_hours):
                     cached = cache_path.read_bytes()
-                    # 上一次可能存进去了半张图（连接读到一半断掉）。校验魔数，
+                    # 上一次可能存进去了半张图（连接读到一半断掉）。魔数只查文件头，
+                    # 半张图的头是完整的，必须再让 Pillow 真正解码一遍；
                     # 不合格就删掉重新下载，否则这个 key 会一直返回坏图。
-                    if self._looks_like_image(cached):
+                    if self._looks_like_image(cached) and self._decodes(cached):
                         return cached
                     logger.warning(f"🧹 缓存图片损坏，重新下载 {cache_key}（{len(cached)} 字节）")
                     try:
@@ -1404,20 +1495,25 @@ class MyPlugin(Star):
         data = None
         for candidate_url, attempts in ordered:
             for attempt in range(attempts):
-                data = None              # 每次尝试都从零开始，绝不继承上一次的半张图
+                # 每次尝试都从零开始；任何异常分支也必须把 data 清回 None，
+                # 否则校验不过的半张图会被外层 `if data:` 当成成功交出去。
+                data = None
                 try:
                     req = urllib.request.Request(candidate_url, headers=self.ASSET_HEADERS)
                     with urllib.request.urlopen(req, timeout=self.download_timeout) as resp:
                         data = resp.read()
                     # 读到一半断流时 read() 也可能不报错，只返回截断的数据。
-                    # 校验不通过就继续重试/换源。
+                    # 魔数查头、Pillow 查像素，两头都过才认；否则继续重试/换源。
                     if not self._looks_like_image(data):
                         raise OSError(f"响应不是有效图片（{len(data or b'')} 字节）")
+                    if not self._decodes(data):
+                        raise OSError(f"图片数据不完整（{len(data or b'')} 字节）")
                     self._note_source_result(candidate_url, True)
                     break
                 except urllib.error.HTTPError as e:
                     # 404/403 说明这个源没有这张图，换源比重试有用
                     last_err = e
+                    data = None            # 半张图不能留在手里，否则外层 if data 会当成成功
                     if e.code in (404, 403, 410):
                         self._note_source_result(candidate_url, True)   # 源是好的，只是没这张图
                         break
@@ -1427,6 +1523,7 @@ class MyPlugin(Star):
                     time.sleep(0.4 * (attempt + 1) ** 2)
                 except Exception as e:
                     last_err = e
+                    data = None            # 同上：校验不过就必须丢掉，绝不能落盘
                     self._note_source_result(candidate_url, False)
                     if attempt == attempts - 1:
                         break
@@ -1489,7 +1586,12 @@ class MyPlugin(Star):
         return "bin"
 
     def _find_local_asset(self, name: str) -> str:
-        """返回本地已存在的预置资源路径（持久化目录优先，其次插件自带），没有则返回 ''"""
+        """返回本地已存在的预置资源路径（持久化目录优先，其次插件自带），没有则返回 ''
+
+        判定标准必须和 _read_local_asset 一致：只查文件大小会把一个 >1KB 的截断图
+        当成"已有"，于是补下载跳过它，而真正读取时又解不开，图层只能去云端兜底。
+        这里直接读出来解一遍，解不开就当没有，让同步去补。
+        """
         bases = []
         assets_dir = getattr(self, 'assets_dir', None)
         if assets_dir:
@@ -1501,10 +1603,12 @@ class MyPlugin(Star):
             for ext in ("png", "webp", "jpg", "jpeg"):
                 path = base / f"{name}.{ext}"
                 try:
-                    if path.is_file() and path.stat().st_size > 1024:
-                        return str(path)
+                    if not path.is_file() or path.stat().st_size <= 1024:
+                        continue
                 except Exception:
                     continue
+                if self._read_local_asset(f"{name}.{ext}"):
+                    return str(path)
         return ""
 
     async def _fetch_image_async(self, url: str, cache_key: str, ttl_hours: int = 168,
@@ -1866,16 +1970,8 @@ class MyPlugin(Star):
         return None
 
     # ------------------------------------------------------------------ #
-    # 兼容旧接口
+    # 内置资源加载
     # ------------------------------------------------------------------ #
-
-    def _sync_plugin_data(self):
-        """旧版插件目录数据同步（OurNotes 版已改为云端下载，无需本地 img/song 资源）"""
-        return
-
-    def _load_images_base64(self):
-        """旧版本地图片加载（OurNotes 版已改为云端下载）"""
-        return
 
     def _load_decorations(self):
         """加载宜/忌图标（沿用插件内置资源，缺失时留空由前端隐藏）"""
@@ -2019,7 +2115,12 @@ class MyPlugin(Star):
     # ------------------------------------------------------------------ #
 
     def _select_random_card(self, character_id=None):
-        """从 SR+/生日卡面中随机选择一张；指定角色时只从该角色的卡面中选"""
+        """从 SR+/生日卡面中随机选择一张；指定角色时只从该角色的卡面中选
+
+        未指定角色时按稀有度加权：SR 与 SSR 出现概率相同（卡面数量差一倍，
+        等概率抽会让 SR 实际几率接近 SSR 两倍），BD 更稀有。
+        指定角色时该角色的卡面数量很少，直接等概率抽。
+        """
         if character_id is not None:
             pool = self._cards_by_character.get(character_id, [])
             if not pool:
@@ -2027,55 +2128,7 @@ class MyPlugin(Star):
             return _secure_random_choice(pool)
         if not self.cards:
             return None
-        return _secure_random_choice(self.cards)
-
-    async def _get_random_song(self):
-        """使用难度相似性算法选择两首歌曲（封面并行下载）"""
-        if not self.songs:
-            return [
-                {"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
-                 "difficulty_type": None, "difficulty_level": None, "difficulty_label": None},
-                {"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
-                 "difficulty_type": None, "difficulty_level": None, "difficulty_label": None}
-            ]
-
-        selected_songs = select_song_with_difficulty(self.songs)
-
-        if len(selected_songs) < 2:
-            selected_songs = selected_songs + [selected_songs[0] if selected_songs else None] * (2 - len(selected_songs))
-
-        import asyncio
-        picks = selected_songs[:2]
-        covers = await asyncio.gather(*(
-            self._get_song_cover(s.get('jacket', '')) if s else _empty_cover()
-            for s in picks
-        ))
-
-        result = []
-        for song, cover_base64 in zip(picks, covers):
-            if song is None:
-                result.append({"name": "暂无歌曲", "name_cn": "暂无歌曲", "cover_base64": "",
-                               "difficulty_type": None, "difficulty_level": None, "difficulty_label": None})
-                continue
-
-            title = song.get('title') or song.get('title_ja') or '未知歌曲'
-            artist = song.get('artist') or song.get('composer') or ''
-
-            result.append({
-                "name": artist,
-                "name_cn": title,
-                "id": song.get('id'),
-                "cover_base64": cover_base64,
-                "difficulty_type": song.get('difficulty_type'),
-                "difficulty_level": _format_level(song.get('difficulty_level')),
-                "difficulty_label": song.get('difficulty_label')
-            })
-
-        while len(result) < 2:
-            result.append({"name": "", "name_cn": "暂无歌曲", "cover_base64": "",
-                           "difficulty_type": None, "difficulty_level": None, "difficulty_label": None})
-
-        return result
+        return _weighted_random_card(self.cards)
 
     # ------------------------------------------------------------------ #
     # 运势
@@ -2177,8 +2230,14 @@ class MyPlugin(Star):
             ok = await self._run_sync_in_thread(force=True)
             if ok:
                 yield event.plain_result(f"✅ 同步完成：{len(self.songs)} 首歌曲，{len(self.cards)} 张卡面")
+            elif self._sync_state.get('running'):
+                # 有一次同步卡在 urlopen 里时，running 会一直为 True，之后所有手动
+                # 同步都立刻返回 False。不说明原因的话用户只会看到莫名的"同步失败"。
+                yield event.plain_result("⚠️ 已有同步任务正在进行，请稍后再试")
             else:
-                yield event.plain_result("⚠️ 同步失败，请查看日志（将继续使用现有数据）")
+                yield event.plain_result(
+                    "⚠️ 同步失败，请查看日志（将继续使用现有数据）。"
+                    "若日志显示 GitHub API 403/限流，是未认证请求的每小时配额用尽，等一小时再试")
         except Exception as e:
             logger.error(f"❌ 手动同步失败: {e}")
             yield event.plain_result(f"⚠️ 同步失败: {e}")
@@ -2202,13 +2261,33 @@ class MyPlugin(Star):
                 return
             char_query = message_text[len(sign_in_cmd):].strip()
 
+        if is_test:
+            # 测试签到会跑完整的取图 + 渲染链路，不设限就会被当成免费出图接口
+            ctx_probe = self._get_context_id(event)
+            now = time.time()
+            last = self._test_signin_last.get(ctx_probe, 0)
+            if now - last < TEST_SIGNIN_COOLDOWN:
+                return
+            self._test_signin_last[ctx_probe] = now
+            # 别让这张表无限长
+            if len(self._test_signin_last) > 512:
+                self._test_signin_last = {
+                    k: v for k, v in self._test_signin_last.items()
+                    if now - v < TEST_SIGNIN_COOLDOWN
+                }
+
         specified_character_id = None
         if char_query:
             specified_character_id = self._resolve_character(char_query)
             if specified_character_id is not None:
                 logger.info(f"🎯 用户指定角色: {char_query} -> characterId={specified_character_id}")
             else:
-                logger.warning(f"⚠️ 未找到角色: {char_query}，静默忽略")
+                logger.warning(f"⚠️ 未找到角色: {char_query}")
+                # 静默 return 会让用户以为机器人坏了，至少告诉他哪里写错了
+                yield event.plain_result(
+                    f"⚠️ 没找到角色「{char_query}」，请换用角色名、别名或罗马字，"
+                    f"例如：签到 祥子 / 签到 anon / 签到 初華"
+                )
                 return
 
         user_id = event.get_sender_id()
@@ -2291,7 +2370,10 @@ class MyPlugin(Star):
                 {
                     "name": existing_daily_state.get('song1_name', ''),
                     "name_cn": existing_daily_state.get('song1_name_cn', ''),
+                    # 存档里的封面可能是早期下载失败时写进去的空串。空的一律重新拉，
+                    # 否则这个用户之后每次重复签到都一直是空封面。
                     "cover_base64": existing_daily_state.get('song1_cover_base64', ''),
+                    "jacket": existing_daily_state.get('song1_jacket', ''),
                     "difficulty_type": existing_daily_state.get('song1_difficulty_type', ''),
                     "difficulty_level": existing_daily_state.get('song1_difficulty_level', 0),
                     "difficulty_label": existing_daily_state.get('song1_difficulty_label', '')
@@ -2300,6 +2382,7 @@ class MyPlugin(Star):
                     "name": existing_daily_state.get('song2_name', ''),
                     "name_cn": existing_daily_state.get('song2_name_cn', ''),
                     "cover_base64": existing_daily_state.get('song2_cover_base64', ''),
+                    "jacket": existing_daily_state.get('song2_jacket', ''),
                     "difficulty_type": existing_daily_state.get('song2_difficulty_type', ''),
                     "difficulty_level": existing_daily_state.get('song2_difficulty_level', 0),
                     "difficulty_label": existing_daily_state.get('song2_difficulty_label', '')
@@ -2313,9 +2396,16 @@ class MyPlugin(Star):
                 logger.warning(f"⚠️ 角色 {specified_character_id} 暂无可用卡面，随机选择")
                 card = self._select_random_card()
             if card is None:
-                # 重新抽失败时退回存档里的卡面，至少保证能出图
+                # 重新抽失败时退回存档里的卡面，至少保证能出图。
+                # character_id 也要带上：贴纸是按角色抽的，缺了它三个贴纸位置全空。
+                saved_asset_id = existing_daily_state.get('card_asset_id', 0)
+                saved_char_id = next(
+                    (c.get('character_id') for c in self.cards
+                     if c.get('asset_id') == saved_asset_id),
+                    None)
                 card = {
-                    'asset_id': existing_daily_state.get('card_asset_id', 0),
+                    'asset_id': saved_asset_id,
+                    'character_id': saved_char_id,
                     'rarity_name': existing_daily_state.get('card_rarity_name', ''),
                     'character_name': existing_daily_state.get('card_character_name', ''),
                     'subtitle': existing_daily_state.get('card_subtitle', ''),
@@ -2329,6 +2419,9 @@ class MyPlugin(Star):
             # 先选歌和卡面（纯内存操作，不联网），再一次性并发拉全部图片
             try:
                 songs = select_song_with_difficulty(self.songs)
+                # 补齐逻辑可能塞进 None（数据集只剩 1 首甚至 0 首时）。
+                # 下面要按 songs[0]/songs[1] 解包封面，None 会直接崩，先滤掉。
+                songs = [s for s in songs if s]
                 if len(songs) < 2:
                     songs = songs + [songs[0] if songs else None] * (2 - len(songs))
                 songs = songs[:2]
@@ -2353,13 +2446,25 @@ class MyPlugin(Star):
             return
 
         # 立绘 / 背景 / 两首封面合成一批并发下载
-        if songs:
+        if songs and len(songs) >= 2 and songs[0] and songs[1]:
+            # 存档里的封面为空（早期下载失败写进去的）时先补拉，别让用户一直看空封面
+            for s in songs[:2]:
+                if not s.get('cover_base64'):
+                    jk = s.get('jacket') or ''
+                    if jk:
+                        s['cover_base64'] = await self._get_song_cover(jk)
+            fetched_covers = [s.get('cover_base64', '') for s in songs[:2]]
             char_b64, bg_b64, songs[0]['cover_base64'], songs[1]['cover_base64'] = \
                 await self.prefetch_signin_assets(
                     card['asset_id'],
                     [s.get('jacket', '') if s else '' for s in songs[:2]],
                 )
+            # prefetch 没拿到封面时，退回补拉到的结果，别被覆盖成空
+            for s, fetched in zip(songs[:2], fetched_covers):
+                if s and not s.get('cover_base64') and fetched:
+                    s['cover_base64'] = fetched
         else:
+            # 数据集只剩一首甚至没有歌时走这里，只出卡面，不出歌曲区块
             char_b64, bg_b64 = await self._get_card_images(card['asset_id'])
 
         # 角色贴纸：成功图标 / 宜 / 忌，从该角色自己的贴纸里抽，宜忌保证不同。
@@ -2386,6 +2491,7 @@ class MyPlugin(Star):
                 state_data.update({
                     'song1_name': songs[0].get('name', ''),
                     'song1_name_cn': songs[0].get('name_cn', ''),
+                    'song1_jacket': songs[0].get('jacket', ''),
                     'song1_cover_base64': songs[0].get('cover_base64', ''),
                     'song1_difficulty_type': songs[0].get('difficulty_type', ''),
                     'song1_difficulty_level': songs[0].get('difficulty_level', 0),
@@ -2395,6 +2501,7 @@ class MyPlugin(Star):
                 state_data.update({
                     'song2_name': songs[1].get('name', ''),
                     'song2_name_cn': songs[1].get('name_cn', ''),
+                    'song2_jacket': songs[1].get('jacket', ''),
                     'song2_cover_base64': songs[1].get('cover_base64', ''),
                     'song2_difficulty_type': songs[1].get('difficulty_type', ''),
                     'song2_difficulty_level': songs[1].get('difficulty_level', 0),
@@ -2405,8 +2512,6 @@ class MyPlugin(Star):
             except Exception as e:
                 logger.error(f"❌ 保存每日签到状态失败: {e}")
 
-        ui_settings = self.config.get('ui_settings', {})
-
         options = {
             "quality": 30,
             "device_scale_factor_level": "high",
@@ -2416,8 +2521,11 @@ class MyPlugin(Star):
             "viewport": {"width": 800, "height": 720}
         }
 
-        song1 = songs[0] if songs and len(songs) >= 1 else {"name": "", "name_cn": "名称：未知歌曲", "cover_base64": "", "difficulty_type": None, "difficulty_level": None, "difficulty_label": None}
-        song2 = songs[1] if songs and len(songs) >= 2 else {"name": "", "name_cn": "名称：未知歌曲", "cover_base64": "", "difficulty_type": None, "difficulty_level": None, "difficulty_label": None}
+        _no_song = {"name": "", "name_cn": "名称：未知歌曲", "cover_base64": "",
+                    "difficulty_type": None, "difficulty_level": None,
+                    "difficulty_label": None, "jacket": ""}
+        song1 = songs[0] if songs and len(songs) >= 1 and songs[0] else dict(_no_song)
+        song2 = songs[1] if songs and len(songs) >= 2 and songs[1] else dict(_no_song)
 
         rarity_class = {'SR': 'sr', 'SSR': 'ssr', 'BD': 'bd'}.get(card.get('rarity_name', ''), 'sr')
 
@@ -2507,6 +2615,8 @@ class MyPlugin(Star):
         if songs and len(songs) > 0:
             lines.append("🎵 今日歌曲推荐：")
             for i, song in enumerate(songs[:2], 1):
+                if not song:
+                    continue
                 name_cn = song.get('name_cn', '')
                 name = song.get('name', '')
                 diff_type = song.get('difficulty_type', '')
@@ -2663,12 +2773,14 @@ class SigninDatabase:
                     song1_difficulty_type TEXT,
                     song1_difficulty_level INTEGER,
                     song1_difficulty_label TEXT,
+                    song1_jacket TEXT,
                     song2_name TEXT,
                     song2_name_cn TEXT,
                     song2_cover_base64 TEXT,
                     song2_difficulty_type TEXT,
                     song2_difficulty_level INTEGER,
                     song2_difficulty_label TEXT,
+                    song2_jacket TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_ref) REFERENCES users(id),
@@ -2702,6 +2814,9 @@ class SigninDatabase:
                 ("sticker_ok", "TEXT"),
                 ("sticker_yi", "TEXT"),
                 ("sticker_ji", "TEXT"),
+                # 重复签到时要靠 jacket 名补拉空封面，缺了这两列封面就永远补不回来
+                ("song1_jacket", "TEXT"),
+                ("song2_jacket", "TEXT"),
             ]:
                 try:
                     conn.execute(f"ALTER TABLE daily_signin_state ADD COLUMN {column} {ddl}")
@@ -2776,7 +2891,10 @@ class SigninDatabase:
                 (ctx_id, user_id)
             ).fetchone()
 
-            if row and row['username'] != username:
+            if row and username and row['username'] != username:
+                # 只在确实拿到了新昵称时才更新。get_user_stats / get_nickname /
+                # save_daily_state 都会以缺省空串调用本方法，无条件更新会把
+                # 已存好的用户名抹成空。
                 conn.execute(
                     "UPDATE users SET username = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (username, row['id'])
@@ -2948,10 +3066,13 @@ class SigninDatabase:
                      sticker_ok, sticker_yi, sticker_ji,
                      song1_name, song1_name_cn, song1_cover_base64,
                      song1_difficulty_type, song1_difficulty_level, song1_difficulty_label,
+                     song1_jacket,
                      song2_name, song2_name_cn, song2_cover_base64,
                      song2_difficulty_type, song2_difficulty_level, song2_difficulty_label,
+                     song2_jacket,
                      updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 user['id'], today,
                 state_data.get('fortune_level', ''),
@@ -2972,12 +3093,14 @@ class SigninDatabase:
                 state_data.get('song1_difficulty_type', ''),
                 state_data.get('song1_difficulty_level', 0),
                 state_data.get('song1_difficulty_label', ''),
+                state_data.get('song1_jacket', ''),
                 state_data.get('song2_name', ''),
                 state_data.get('song2_name_cn', ''),
                 state_data.get('song2_cover_base64', ''),
                 state_data.get('song2_difficulty_type', ''),
                 state_data.get('song2_difficulty_level', 0),
-                state_data.get('song2_difficulty_label', '')
+                state_data.get('song2_difficulty_label', ''),
+                state_data.get('song2_jacket', '')
             ))
 
             conn.commit()

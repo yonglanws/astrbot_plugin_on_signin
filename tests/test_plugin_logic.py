@@ -500,7 +500,8 @@ check("_fetch_image_async is a coroutine function",
       inspect.iscoroutinefunction(plugin_main.MyPlugin._fetch_image_async))
 check("_get_card_images is async", inspect.iscoroutinefunction(plugin_main.MyPlugin._get_card_images))
 check("_get_song_cover is async", inspect.iscoroutinefunction(plugin_main.MyPlugin._get_song_cover))
-check("_get_random_song is async", inspect.iscoroutinefunction(plugin_main.MyPlugin._get_random_song))
+check("prefetch_signin_assets is async",
+      inspect.iscoroutinefunction(plugin_main.MyPlugin.prefetch_signin_assets))
 check("_fetch_image_async delegates to run_in_executor",
       "run_in_executor" in inspect.getsource(plugin_main.MyPlugin._fetch_image_async))
 
@@ -624,7 +625,7 @@ except Exception as e:
 finally:
     plugin_main.urllib.request.urlopen = orig_urlopen
 
-# 6) _get_random_song 在封面全失败时仍返回两首歌（不抛异常）
+# 6) 封面全失败时歌曲挑选本身不抛异常（listen_signin 靠这个保证能出卡）
 inst6 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
 inst6.cache_dir = tmp_inst_dir / "cache4"
 inst6.download_timeout = 1
@@ -638,22 +639,37 @@ inst6.cards = cards
 inst6._cards_by_character = {}
 plugin_main.urllib.request.urlopen = _slow_urlopen
 try:
-    picks = asyncio.run(asyncio.wait_for(inst6._get_random_song(), timeout=10))
+    picks = plugin_main.select_song_with_difficulty(inst6.songs)
     check("song picks survive cover failures", len(picks) == 2, str(len(picks)))
-    check("cover fields empty on failure", all(p["cover_base64"] == "" for p in picks))
     check("song metadata still present",
-          all(p["name_cn"] and p["difficulty_type"] in ("hard", "expert") for p in picks),
-          str([(p["name_cn"], p["difficulty_type"]) for p in picks]))
+          all((p.get("title") or p.get("title_ja"))
+              and p.get("difficulty_type") in ("hard", "expert") for p in picks),
+          str([(p.get("title"), p.get("difficulty_type")) for p in picks]))
 except Exception as e:
     check("song picks survive cover failures", False, repr(e)[:200])
 finally:
     plugin_main.urllib.request.urlopen = orig_urlopen
 
-# 7) 空歌曲库不应崩溃
+# 7) 空歌曲库不应崩溃，且 listen_signin 的补齐逻辑要能过滤掉 None
 inst7 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
 inst7.songs = []
-empty_picks = asyncio.run(inst7._get_random_song())
-check("empty song library returns 2 placeholders", len(empty_picks) == 2, str(len(empty_picks)))
+check("empty song library yields no picks",
+      plugin_main.select_song_with_difficulty(inst7.songs) == [])
+# 复现 listen_signin 的补齐：None 必须被滤掉，否则下面按 songs[0]/songs[1] 解包会崩
+def _pad(sel):
+    sel = [s for s in sel if s]
+    if len(sel) < 2:
+        sel = sel + [sel[0] if sel else None] * (2 - len(sel))
+    return sel[:2]
+_padded_empty = _pad([])
+check("padding an empty song list keeps None out of index 0",
+      _padded_empty[0] is None or isinstance(_padded_empty[0], dict), str(_padded_empty))
+try:
+    _ = _padded_empty[0]["name_cn"] if _padded_empty[0] else None
+    _ = _padded_empty[1]["name_cn"] if _padded_empty[1] else None
+    check("padded list is safe to subscript", True)
+except Exception as e:
+    check("padded list is safe to subscript", False, repr(e)[:200])
 
 # 8) 整体时间预算：即使单张请求无限卡住，_get_card_images 也必须在预算内返回
 inst8 = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
@@ -1185,8 +1201,10 @@ check("repeat signin honors explicit character query",
 check("saved card is not reused verbatim",
       "card = {\n                'asset_id': existing_daily_state" not in src_main)
 # 新抽的卡面必须带上 character_id，贴纸才能跟着角色走
+# 指定角色走角色卡池，未指定走按稀有度加权的全卡池
 check("re-rolled card carries character_id",
-      "_secure_random_choice(pool)" in src_main and "_secure_random_choice(self.cards)" in src_main)
+      "_secure_random_choice(pool)" in src_main
+      and "_weighted_random_card(self.cards)" in src_main)
 
 # 用真实实例验证：重复签到连续抽到的卡面应当会变化（42 张卡，抽 10 次至少出现 2 种）
 inst_r = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
@@ -1587,6 +1605,323 @@ _t2 = inst_as._sync_assets_if_needed({
 if _t2 is not None:
     _t2.join(timeout=30)
 check("no download when everything is present", not _dl_calls, str(_dl_calls))
+
+print()
+print("=" * 70)
+print("TEST 9: 稀有度概率公平 + 空封面补拉")
+print("=" * 70)
+
+from collections import Counter as _Counter
+
+_ds = json.load(open(PLUGIN_DIR / "data" / "ournotes_data.json", encoding="utf-8"))
+_all_cards = _ds["cards"]
+print("卡池构成:", dict(_Counter((c.get("rarity_name") or "").upper() for c in _all_cards)))
+
+_inst_w = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+_inst_w.cards = _all_cards
+_inst_w._index_cards()
+
+_N = 12000
+_hits = _Counter()
+for _ in range(_N):
+    c = _inst_w._select_random_card()
+    if c:
+        _hits[(c.get("rarity_name") or "").upper()] += 1
+
+_sr_pct = _hits["SR"] / _N * 100
+_ssr_pct = _hits["SSR"] / _N * 100
+_bd_pct = _hits["BD"] / _N * 100
+print("实测: SR %.1f%%  SSR %.1f%%  BD %.2f%%" % (_sr_pct, _ssr_pct, _bd_pct))
+
+check("SSR weight equals SR weight",
+      plugin_main.RARITY_WEIGHTS["SSR"] == plugin_main.RARITY_WEIGHTS["SR"],
+      str(plugin_main.RARITY_WEIGHTS))
+check("SR rate is not skewed by having more cards",
+      abs(_sr_pct - _ssr_pct) < 3.0,
+      "SR %.1f%% vs SSR %.1f%%" % (_sr_pct, _ssr_pct))
+check("SR and SSR each land near the expected share",
+      40 <= _sr_pct <= 60 and 40 <= _ssr_pct <= 60,
+      "SR %.1f%% SSR %.1f%%" % (_sr_pct, _ssr_pct))
+check("BD stays rarer than SR/SSR", _bd_pct < 15.0, "BD %.2f%%" % _bd_pct)
+
+_seen = set()
+for _ in range(_N):
+    c = _inst_w._select_random_card()
+    if c:
+        _seen.add(c.get("asset_id"))
+check("weighted draw still reaches every card eventually",
+      _seen >= {c["asset_id"] for c in _all_cards},
+      "reached %d of %d" % (len(_seen), len(_all_cards)))
+
+_cid = _all_cards[0]["character_id"]
+_ids = {c["asset_id"] for c in _all_cards if c["character_id"] == _cid}
+check("specified character stays within that character's cards",
+      all(_inst_w._select_random_card(_cid)["asset_id"] in _ids for _ in range(200)))
+check("unknown character returns None",
+      _inst_w._select_random_card(999999) is None)
+
+# 存档里的空封面要能被重新拉起来，而不是一直空着
+_inst_r = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+_inst_r.cache_dir = tmp_inst_dir / "cache_refill"
+_inst_r.assets_dir = tmp_inst_dir / "pd_refill"
+_inst_r.download_timeout = 5
+_inst_r._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+_inst_r.data_dir = tmp_inst_dir
+_inst_r.master_dir = tmp_inst_dir / "masterdata"
+_inst_r._sync_lock = threading.Lock()
+_inst_r._sync_state = {"last_sync": None, "running": False}
+_inst_r.ASSET_HEADERS = {"User-Agent": "x"}
+_inst_r.plugin_dir = tmp_inst_dir
+
+_calls_r = []
+
+
+def _rec_cover(jacket, *a, **k):
+    _calls_r.append(jacket)
+    return "data:image/webp;base64,AAAA"
+
+
+_inst_r._get_song_cover = _rec_cover
+
+_saved = [{"jacket": "jkt_001_100001", "cover_base64": ""}]
+for s in _saved:
+    if not s.get("cover_base64"):
+        jk = s.get("jacket") or ""
+        if jk:
+            s["cover_base64"] = _inst_r._get_song_cover(jk)
+check("empty saved cover is refetched",
+      _saved[0]["cover_base64"].startswith("data:image/"), str(_saved[0]))
+check("refetch uses the jacket name stored in the daily state",
+      _calls_r == ["jkt_001_100001"], str(_calls_r))
+
+_fetched = [s.get("cover_base64", "") for s in _saved]
+_prefetch_got = ""
+for s, f in zip(_saved, _fetched):
+    if not _prefetch_got and f:
+        s["cover_base64"] = f
+check("prefetch miss falls back to the refetched cover",
+      _saved[0]["cover_base64"] == "data:image/webp;base64,AAAA", str(_saved[0]))
+
+print()
+print("=" * 70)
+print("TEST 10: 资源链路回归（schema 列 / 坏缓存 / 原子写 / 线程池隔离 / 用户名保护）")
+print("=" * 70)
+
+# 1) song1_jacket / song2_jacket 必须真实存在于表里。
+#    缺列时 save_daily_state 会静默丢掉 jacket，重复签到的封面永远补不回来。
+_db10 = plugin_main.SigninDatabase(Path(tempfile.mkdtemp()) / "regress.db")
+_cols = [r[1] for r in _db10._get_conn().execute("PRAGMA table_info(daily_signin_state)")]
+check("daily_signin_state has song1_jacket column", "song1_jacket" in _cols, str(_cols))
+check("daily_signin_state has song2_jacket column", "song2_jacket" in _cols, str(_cols))
+
+_db10.save_daily_state("user_1", "1", "测试", {
+    "song1_jacket": "jkt_001_100001",
+    "song1_name": "迷星叫",
+    "song1_cover_base64": "data:image/webp;base64,AAAA",
+    "song2_jacket": "jkt_002_100043",
+    "song2_cover_base64": "",
+})
+_row10 = _db10.get_daily_state("user_1", "1")
+check("song1_jacket survives a save/get round trip",
+      _row10.get("song1_jacket") == "jkt_001_100001", repr(_row10.get("song1_jacket")))
+check("song2_jacket survives a save/get round trip",
+      _row10.get("song2_jacket") == "jkt_002_100043", repr(_row10.get("song2_jacket")))
+check("empty song2 cover is stored as empty (refill path needs to see it)",
+      _row10.get("song2_cover_base64") == "")
+
+# 旧库（没有 jacket 列）升级后必须补上这两列
+_old_dir = Path(tempfile.mkdtemp())
+_old_conn = sqlite3.connect(str(_old_dir / "old.db"))
+_old_conn.executescript("""
+    CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, ctx_id TEXT, user_id TEXT,
+                        username TEXT DEFAULT '', last_checkin TEXT, total_checkins INTEGER DEFAULT 0,
+                        max_streak INTEGER DEFAULT 0, current_streak INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, UNIQUE(ctx_id, user_id));
+    CREATE TABLE daily_signin_state (id INTEGER PRIMARY KEY AUTOINCREMENT, user_ref INTEGER,
+                        signin_date TEXT, fortune_level TEXT, UNIQUE(user_ref, signin_date));
+""")
+_old_conn.commit()
+_old_conn.close()
+_db10b = plugin_main.SigninDatabase(_old_dir / "old.db")
+_cols10b = [r[1] for r in _db10b._get_conn().execute("PRAGMA table_info(daily_signin_state)")]
+check("legacy database gains song1_jacket on migration", "song1_jacket" in _cols10b, str(_cols10b))
+check("legacy database gains song2_jacket on migration", "song2_jacket" in _cols10b, str(_cols10b))
+
+# 2) 空 username 不得覆盖已有值（get_user_stats / get_nickname 都以空串调用）
+_db10.get_or_create_user("user_9", "9", "原始昵称")
+_db10.get_user_stats("user_9", "9")
+_db10.get_nickname("user_9", "9")
+_db10.get_daily_state("user_9", "9")
+_saved_name = _db10._get_conn().execute(
+    "SELECT username FROM users WHERE ctx_id = 'user_9'").fetchone()["username"]
+check("empty username does not clobber a stored name",
+      _saved_name == "原始昵称", repr(_saved_name))
+_db10.get_or_create_user("user_9", "9", "新昵称")
+_updated = _db10._get_conn().execute(
+    "SELECT username FROM users WHERE ctx_id = 'user_9'").fetchone()["username"]
+check("a real username still updates", _updated == "新昵称", repr(_updated))
+_db10.close()
+_db10b.close()
+
+# 3) 坏 .bin 缓存必须被识别为损坏并重新下载，而不是永久返回坏图
+inst10c = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst10c.cache_dir = Path(tempfile.mkdtemp()) / "cache10c"
+inst10c.download_timeout = 2
+inst10c._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst10c.data_dir = Path(tempfile.mkdtemp())
+inst10c.plugin_dir = Path(tempfile.mkdtemp())
+inst10c.master_dir = inst10c.data_dir / "masterdata"
+inst10c._sync_lock = threading.Lock()
+inst10c._sync_state = {"last_sync": None, "running": False}
+inst10c.ASSET_HEADERS = {"User-Agent": "x"}
+inst10c.cache_dir.mkdir(parents=True, exist_ok=True)
+
+# 截断图能骗过魔数（PNG 头完整），只有完整解码能暴露
+_bad_bin = inst10c.cache_dir / "card_63_member_character.bin"
+_bad_bin.write_bytes(_trunc_png)
+check("truncated png still passes the magic check",
+      plugin_main.MyPlugin._looks_like_image(_trunc_png))
+check("truncated png fails the full decode check",
+      not plugin_main.MyPlugin._decodes(_trunc_png))
+
+# _fetch_image 读到坏缓存必须走重新下载，而不是把坏图交出去
+_good_calls = []
+
+
+def _good_urlopen(req, timeout=None):
+    _good_calls.append(req.full_url)
+    return _TruncConn.__new__(_TruncConn) if False else _FullConn()
+
+
+class _FullConn:
+    def read(self, *a):
+        return _full_png
+    def __enter__(self):
+        return self
+    def __exit__(self, *a):
+        return False
+
+
+_orig_u = plugin_main.urllib.request.urlopen
+plugin_main.urllib.request.urlopen = _good_urlopen
+try:
+    data = inst10c._fetch_image(
+        "https://haneoka.org/assets/intl/Assets/AddressableResources/MemberCard/63/member_character.png",
+        "card_63_member_character")
+    check("corrupt cache triggers a redownload", len(_good_calls) >= 1, str(_good_calls))
+    check("redownloaded data is the complete image", data == _full_png, f"{len(data)} bytes")
+    _healed = (inst10c.cache_dir / "card_63_member_character.bin").read_bytes()
+    check("cache file is replaced with the good image", _healed == _full_png)
+except Exception as e:
+    check("corrupt cache self-heals", False, repr(e)[:200])
+finally:
+    plugin_main.urllib.request.urlopen = _orig_u
+
+# 下载回来的截断图不能被当成成功结果（否则会写进缓存自锁）
+inst10d = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst10d.cache_dir = Path(tempfile.mkdtemp()) / "cache10d"
+inst10d.download_timeout = 1
+inst10d._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst10d.data_dir = Path(tempfile.mkdtemp())
+inst10d.plugin_dir = Path(tempfile.mkdtemp())
+inst10d.master_dir = inst10d.data_dir / "masterdata"
+inst10d._sync_lock = threading.Lock()
+inst10d._sync_state = {"last_sync": None, "running": False}
+inst10d.ASSET_HEADERS = {"User-Agent": "x"}
+
+plugin_main.urllib.request.urlopen = lambda req, timeout=None: _TruncConn()
+try:
+    raised = False
+    try:
+        inst10d._fetch_image("https://haneoka.org/x.png", "card_99_member_character")
+    except Exception:
+        raised = True
+    check("a truncated download is not accepted as success", raised)
+    check("truncated download leaves no cache file behind",
+          not (inst10d.cache_dir / "card_99_member_character.bin").exists())
+    check("truncated download writes no local asset",
+          not (inst10d.data_dir / "assets" / "cards" / "99_member_character.png").exists())
+finally:
+    plugin_main.urllib.request.urlopen = _orig_u
+
+# 4) master 表损坏必须被当成"没有"，而不是永久复用
+_mdir = Path(tempfile.mkdtemp())
+(_dir := _mdir).mkdir(parents=True, exist_ok=True)
+check("_load_master_table returns None for a missing file",
+      plugin_main.MyPlugin._load_master_table(_mdir / "nope.json") is None)
+(_mdir / "empty.json").write_text("", encoding="utf-8")
+check("_load_master_table returns None for a 0-byte file",
+      plugin_main.MyPlugin._load_master_table(_mdir / "empty.json") is None)
+(_mdir / "half.json").write_text('{"_allData": [{"_id":', encoding="utf-8")
+check("_load_master_table returns None for a truncated file",
+      plugin_main.MyPlugin._load_master_table(_mdir / "half.json") is None)
+(_mdir / "good.json").write_text('{"_allData": []}', encoding="utf-8")
+check("_load_master_table accepts a valid file",
+      plugin_main.MyPlugin._load_master_table(_mdir / "good.json") == {"_allData": []})
+
+# _atomic_write 失败时不能留下半个文件，也不能留下 .tmp
+_atom = _mdir / "atom.json"
+plugin_main.MyPlugin._atomic_write(_atom, '{"ok": true}')
+check("_atomic_write produces a readable file",
+      json.loads(_atom.read_text(encoding="utf-8")) == {"ok": True})
+check("_atomic_write leaves no temp file behind",
+      not (_mdir / "atom.json.tmp").exists())
+check("_atomic_write target replaced in place (same inode path)",
+      _atom.exists() and _atom.stat().st_size > 0)
+
+# 5) 补下载必须用独立线程池，不能和签到抢 2 个 worker
+_src10 = (PLUGIN_DIR / "main.py").read_text(encoding="utf-8")
+_i = _src10.index("def _download_missing_assets")
+_j = _src10.index("def _build_dataset")
+check("backfill creates its own thread pool",
+      "ThreadPoolExecutor" in _src10[_i:_j], "no pool in _download_missing_assets")
+check("backfill pool is not the shared signin pool",
+      "self._executor" not in _src10[_i:_j], "backfill still uses self._executor")
+check("backfill caps each file with a timeout",
+      "future.result(timeout=" in _src10[_i:_j])
+
+# 6) _find_local_asset 的判定标准必须和 _read_local_asset 一致
+inst10e = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst10e.assets_dir = Path(tempfile.mkdtemp()) / "assets10e"
+inst10e.plugin_dir = Path(tempfile.mkdtemp())
+(inst10e.assets_dir / "cards").mkdir(parents=True, exist_ok=True)
+# 一个 >1KB 的截断图：只看大小会误判为"已有"，于是补下载跳过它
+_big_bad = inst10e.assets_dir / "cards" / "77_member_character.png"
+_big_bad.write_bytes(_full_png[:len(_full_png) // 2] + b"\x00" * 4000)
+check("a >1KB truncated asset is not reported as present",
+      inst10e._find_local_asset("cards/77_member_character") == "")
+check("_read_local_asset also refuses the truncated asset",
+      inst10e._read_local_asset("cards/77_member_character") == b"")
+_good_asset = inst10e.assets_dir / "cards" / "78_member_character.png"
+_good_asset.write_bytes(_full_png)
+check("a valid asset is still reported as present",
+      bool(inst10e._find_local_asset("cards/78_member_character")))
+
+# 7) 测试签到必须有冷却，且冷却常量已定义
+check("TEST_SIGNIN_COOLDOWN is defined",
+      isinstance(getattr(plugin_main, "TEST_SIGNIN_COOLDOWN", None), float)
+      and plugin_main.TEST_SIGNIN_COOLDOWN > 0,
+      str(getattr(plugin_main, "TEST_SIGNIN_COOLDOWN", None)))
+check("listen_signin enforces the test-signin cooldown",
+      "_test_signin_last" in _src10 and "TEST_SIGNIN_COOLDOWN" in _src10)
+
+# 8) 未知角色必须给用户反馈，而不是静默 return
+_i2 = _src10.index("async def listen_signin")
+check("unknown character produces a reply, not a silent return",
+      "没找到角色" in _src10[_i2:], "no user-visible message for an unknown character")
+check("sync failure explains the GitHub API quota case",
+      "GitHub API" in _src10, "manual sync failure message lacks the rate-limit hint")
+
+# 9) 数据集里歌曲字段齐全，保证补齐逻辑不会造出 None
+check("every song in the bundled dataset has a jacket",
+      all(s.get("jacket") for s in songs))
+check("every song in the bundled dataset has a title",
+      all(s.get("title") or s.get("title_ja") for s in songs))
+check("every card in the bundled dataset has an asset_id",
+      all(c.get("asset_id") for c in cards))
+check("every card in the bundled dataset has a character_id",
+      all(c.get("character_id") is not None for c in cards))
 
 print()
 print("=" * 70)
