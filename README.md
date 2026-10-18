@@ -1,16 +1,18 @@
 # OurNotes 签到插件
 
 OurNotes（MyGO!!!!! / Ave Mujica / 夢限大MewType / millsage / 一家Dumb Rock!）风格的签到打卡插件。
-卡面立绘与背景全部**云端按需下载**，歌曲名、难度、卡面数据每天自动从繁中服 master 数据同步。
+**首次运行会自动把立绘、背景、封面下载到持久化目录**，之后签到不依赖外网；master 数据每天自动同步，检测到新卡面/新立绘会补齐对应图片。歌曲名、难度、卡面数据同样自动同步。
 
 ## 特性
 
-- **云端卡面**：立绘与背景来自 `assets.bdon.moe`，不再需要手动往持久化目录塞图
+- **图片自动下载**：首次运行自动拉取全部立绘/背景/封面到 `plugin_data/assets/`，本地已有的一律跳过，不重复下载
+- **增量更新**：master 数据同步时检测缺图，新卡面/新封面的图片在后台补齐，失败的留待下次同步重试
+- **离线可用**：图片落到持久化目录，更新插件不会丢；签到命中本地图时零网络等待
 - **只用 SR 以上与生日卡面**：卡池剔除 R 卡，包含 SSR 与 BD（生日）卡
 - **OurNotes 难度体系**：只有 `HARD`（黄）与 `EXPERT`（红），没有 MASTER / APPEND
 - **每日自动同步**：从 [`moenotes-masterdata/hk-tw-mo`](https://github.com/StarMoe-org/moenotes-masterdata/tree/main/hk-tw-mo) 拉取歌曲名、难度与新增卡面，一天一次
 - **指定角色签到**：`签到 祥子`、`签到 anon`、`签到 初華` 都行
-- **每日运势 + 宜忌 + 歌曲推荐**：同一天重复签到会复用当天已抽到的结果
+- **每日运势 + 宜忌 + 歌曲推荐**：同一天重复签到会复用当天已抽到的结果；卡面与贴纸会重新抽取，宜忌文案保持不变
 - **性能优化**：图片走本地磁盘缓存，SQLite 不存大体积 base64，历史数据每日清理并回收空间
 
 ## 安装
@@ -38,24 +40,56 @@ git clone https://github.com/yonglanws/astrbot_plugin_on_signin.git
 |------|------|
 | 歌曲名 / 难度 / 作曲 | `moenotes-masterdata` 的 `hk-tw-mo/MasterLiveMusic.json` + `MasterLiveMusicScore.json` + `MasterText.json` |
 | 卡面 / 角色 | 同仓库 `hk-tw-mo/MasterMemberCard.json` + `MasterCharacter.json` + `MasterBand.json` |
-| 立绘 / 背景 / 封面图 | `https://assets.bdon.moe/zh-Hans/...` |
+| 立绘 / 背景 / 封面图 | 首次运行自动下载到 `plugin_data/assets/`；插件自带 `data/assets/` 作兜底 |
 
 同步只取繁中服（hk-tw-mo）目录，不做全仓库克隆。首次启动会在后台同步一次，之后每天最多一次；
 插件目录内附带一份 `data/ournotes_data.json` 作为离线兜底，同步失败也能正常签到。
 
-### 资产 URL 规则
+> ### ⚠️ 图片是自动下载的，不用手动往目录里塞图
+>
+> **首次运行插件时，会自动把数据集里全部立绘、背景、封面下载到
+> `AstrBot/data/plugin_data/astrbot_plugin_on_signin/assets/`**，后台执行，不影响其他功能。
+> 下载在日志里体现为 `🧩 检测到 N 个卡面图层与 M 张封面缺失，开始后台补下载` 和
+> `✅ 后台补下载完成：N 个文件`。
+>
+> 之后每次 master 数据同步（默认每天一次）都会重新检查：**只要 master 里出现了本地没有的
+> 卡面或封面，就自动把缺的图补下来**，游戏更新新卡面无需改插件。已经下载过的文件一律跳过，
+> 不会重复请求 CDN。
+>
+> 手动同步会发送 `同步卡面数据`，同样会触发缺图补下载。
+>
+> 如果机器到 CDN 的网络很差（国内直连 Cloudflare 经常握手/读超时），首次补下载可能要多跑几轮，
+> 失败的会留到下次同步继续尝试；也可以先在有代理的机器上用 `tools/fetch_assets.py` 下载，
+> 再把文件按下面的目录结构拷过去：
+>
+> ```bash
+> # 在能连通 CDN 的机器上执行，产出 png/webp 文件
+> python tools/fetch_assets.py --out assets
+> ```
+>
+> ```
+> assets/cards/<assetID>_member_character.png     # 立绘
+> assets/cards/<assetID>_member_background.png    # 背景
+> assets/jackets/<jacketAssetName>.png            # 歌曲封面
+> ```
 
-```
-背景:   https://assets.bdon.moe/zh-Hans/MemberCard/<assetID>/member_background/member_background.webp
-立绘:   https://assets.bdon.moe/zh-Hans/MemberCard/<assetID>/member_character/member_character.webp
-封面:   https://assets.bdon.moe/zh-Hans/Image/Jacket/<jacketAssetName>/<jacketAssetName>.webp
-```
+### 图片寻址顺序与校验
+
+读取顺序：**磁盘缓存 → `plugin_data/assets/` → 插件自带 `data/assets/` → 云端多源**。
+
+每一层都会校验：先查图片魔数，再用 Pillow 完整解码一遍。截断的文件（连接读到一半断掉，
+PNG 头是完整的但数据不全）能骗过魔数检查，只有真正解码才会暴露，所以两道都要过。
+不合格的文件直接忽略并继续往下找，绝不把坏图渲染出来。
+
+云端部分会尝试 `haneoka.org`（主源）和 `assets.bdon.moe`（备选源）两个源，单源失败自动重试并切换，
+并对刚失败过的源做短时间冷却，避免每张图都先在坏源上耗掉超时。批量取图有整体时间上限，
+超时的那一刻已经拿到的图层会被保留，不会因为一张图卡住而丢掉其他图。
 
 ## 目录说明
 
 | 目录 | 路径 | 说明 |
 |------|------|------|
-| 插件目录 | `AstrBot/data/plugins/astrbot_plugin_on_signin/` | 代码、字体、`characters.json`、内置兜底数据 |
+| 插件目录 | `AstrBot/data/plugins/astrbot_plugin_on_signin/` | 代码、字体、`characters.json`、内置兜底数据、`data/assets/` 预置图片 |
 | 持久化目录 | `AstrBot/data/plugin_data/astrbot_plugin_on_signin/` | 运行时数据 |
 
 ```
@@ -63,7 +97,10 @@ plugin_data/astrbot_plugin_on_signin/
 ├── signin.db                 # SQLite：用户、签到历史、每日状态
 ├── ournotes_data.json        # 同步后生成的歌曲/卡面数据
 ├── masterdata/               # 同步下来的 master 表 + sync_state.json
-└── cache/                    # 云端图片磁盘缓存（立绘/背景/封面）
+├── assets/                   # 自动下载的立绘/背景/封面（首次运行生成，更新插件不丢）
+│   ├── cards/                #   <assetID>_member_character.png / _member_background.png
+│   └── jackets/              #   <jacketAssetName>.png
+└── cache/                    # 图片磁盘缓存（含已编码 data URI）
 ```
 
 ## 配置
@@ -73,7 +110,7 @@ plugin_data/astrbot_plugin_on_signin/
 | `sign_in_command` | string | `签到` | 触发指令 |
 | `history_keep_days` | int | `365` | 签到历史保留天数，过期数据每日自动清理 |
 | `auto_sync_masterdata` | bool | `true` | 是否每天自动同步 master 数据 |
-| `download_timeout` | int | `12` | 单张云端图片下载超时（秒） |
+| `download_timeout` | int | `20` | 单张云端图片下载超时（秒）。有预置图时完全不联网，此项只影响新卡面的兜底下载 |
 
 在 AstrBot WebUI 插件设置页面修改后重载即可。
 

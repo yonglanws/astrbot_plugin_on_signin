@@ -895,6 +895,8 @@ class MyPlugin(Star):
         self.db_path = self.data_dir / "signin.db"
         self.cache_dir = self.data_dir / "cache"
         self.master_dir = self.data_dir / "masterdata"
+        # 运行时下载的立绘/背景/封面，插件更新不会丢；插件自带 data/assets/ 作兜底
+        self.assets_dir = self.data_dir / "assets"
 
         # 本地内置数据（插件随附，用于离线兜底）
         self.builtin_data_file = self.plugin_dir / "data" / "ournotes_data.json"
@@ -1109,12 +1111,69 @@ class MyPlugin(Star):
             self.cards = dataset.get('cards', [])
             self._index_cards()
             logger.info(f"✅ masterdata 同步完成：{len(self.songs)} 首歌曲, {len(self.cards)} 张卡面")
+            # master 里出现新卡面/新封面时，把缺的图片补下载到持久化目录
+            self._sync_assets_if_needed(dataset)
             return True
         except Exception as e:
             logger.error(f"❌ masterdata 同步异常: {e}")
             return False
         finally:
             self._sync_state['running'] = False
+
+    def _sync_assets_if_needed(self, dataset: dict):
+        """把数据集里缺图的卡面/封面补下载到持久化目录
+
+        只在确实缺文件时才发起下载，已存在的一律跳过，所以日常同步不产生网络开销。
+        下载放在后台线程里，避免拖慢签到指令本身。
+        """
+        missing_cards = []
+        for card in dataset.get('cards', []):
+            cid = card.get('asset_id')
+            if not cid:
+                continue
+            for kind in ("member_character", "member_background"):
+                if not self._find_local_asset(f"cards/{cid}_{kind}"):
+                    missing_cards.append((cid, kind))
+        missing_jackets = []
+        for song in dataset.get('songs', []):
+            jk = song.get('jacket') or song.get('jacket_asset')
+            if jk and not self._find_local_asset(f"jackets/{jk}"):
+                missing_jackets.append(jk)
+
+        total = len(missing_cards) + len(missing_jackets)
+        if not total:
+            return
+        logger.info(f"🧩 检测到 {len(missing_cards)} 个卡面图层与 {len(missing_jackets)} "
+                    f"张封面缺失，开始后台补下载")
+        import threading
+        t = threading.Thread(target=self._download_missing_assets,
+                             args=(missing_cards, missing_jackets), daemon=True)
+        t.start()
+        return t
+
+    def _download_missing_assets(self, missing_cards, missing_jackets):
+        """后台补齐缺图；失败的留着不管，下次同步会再试"""
+        done = 0
+        for cid, kind in missing_cards:
+            try:
+                url, fallbacks = self._card_asset_urls(cid, kind)
+                self._fetch_image(url, f"card_{cid}_{kind}", fallback_urls=fallbacks,
+                                  local_names=self._card_local_names(cid, kind),
+                                  target_subdir="cards")
+                done += 1
+            except Exception as e:
+                logger.warning(f"⚠️ 补下载立绘/背景失败 card={cid} {kind}: {e}")
+        for jk in missing_jackets:
+            try:
+                url, fallbacks = self._jacket_urls(jk)
+                self._fetch_image(url, f"jkt_{jk}", fallback_urls=fallbacks,
+                                  local_names=self._jacket_local_names(jk),
+                                  target_subdir="jackets")
+                done += 1
+            except Exception as e:
+                logger.warning(f"⚠️ 补下载封面失败 {jk}: {e}")
+        if done:
+            logger.info(f"✅ 后台补下载完成：{done} 个文件")
 
     def _build_dataset(self, tables: dict) -> dict:
         """把 master 表合并为插件使用的精简数据集（歌曲名 / 难度 / 卡面）"""
@@ -1231,6 +1290,19 @@ class MyPlugin(Star):
             return data[8:12] == b"WEBP"
         return any(data.startswith(m) for m in cls.IMAGE_MAGICS if m != b"RIFF")
 
+    @staticmethod
+    def _decodes(data: bytes) -> bool:
+        """Pillow 完整解码一遍：截断的图在这一步必然报错
+
+        Image.open() 只读文件头，半张图会被当成合法图；load() 才会真正解像素。
+        """
+        try:
+            img = Image.open(io.BytesIO(data))
+            img.load()
+            return True
+        except Exception:
+            return False
+
     # 源健康度跟踪：Cloudflare 限流时会直接重置连接，一次失败不代表资源不存在。
     # 记录"最近一次失败时间 + 连续失败次数"，用于把可疑源排到后面。
     _SOURCE_COOLDOWN = 20.0      # 秒：源失败后的冷却时长
@@ -1275,11 +1347,19 @@ class MyPlugin(Star):
         return sorted(candidates, key=_penalty)
 
     def _fetch_image(self, url: str, cache_key: str, ttl_hours: int = 168,
-                     fallback_urls=()) -> bytes:
+                     fallback_urls=(), local_names=(), target_subdir=None) -> bytes:
         """下载图片并写入本地磁盘缓存；命中缓存直接读文件（内存零占用）
 
         fallback_urls 是备选源：主源失败（超时/连接重置/404）时按顺序尝试，
-        全部失败才抛异常。用户侧表现为"偶尔慢一点但一定能拿到图"。
+        全部失败才抛异常。
+
+        local_names 是预置资源名（不带扩展名），会依次在
+        plugin_data/assets/（运行时下载落地的位置）和插件自带 data/assets/ 里找。
+        服务器到 CDN 的 TLS 握手和读操作经常超时（实测一张曲绘 6~200s，
+        并发竞速仍有约三分之一概率全部失败），所以本地有图就绝不联网。
+
+        target_subdir 非空时，下载成功的图片会额外落一份到
+        plugin_data/assets/<subdir>/ 下，下次同步检测到它存在就不再重下。
 
         注意：这是同步阻塞调用，只允许在 executor 线程里执行（见 _fetch_image_async），
         不能在事件循环线程里直接调用。
@@ -1301,6 +1381,19 @@ class MyPlugin(Star):
                         pass
         except Exception:
             pass
+
+        # 预置资源优先：本地有就绝不联网，这是"一定能拿到图"的保证。
+        for name in (local_names or ()):
+            data = self._read_local_asset(name)
+            if data:
+                try:
+                    self.cache_dir.mkdir(parents=True, exist_ok=True)
+                    tmp = cache_path.with_suffix('.tmp')
+                    tmp.write_bytes(data)
+                    tmp.replace(cache_path)
+                except Exception:
+                    pass
+                return data
 
         # 主源 + 备选源依次尝试；每个源最多 2 次（退避 0.4s/0.9s 避开限流窗口）
         # 源级冷却：某个源刚连续失败过（Cloudflare 限流会重置连接），
@@ -1344,6 +1437,10 @@ class MyPlugin(Star):
         if not data:
             raise last_err if last_err else RuntimeError("download failed")
 
+        # 按实际格式落一份到持久化目录，下次同步检测到文件存在就跳过下载
+        if target_subdir:
+            self._store_local_asset(target_subdir, cache_key, data)
+
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
             tmp = cache_path.with_suffix('.tmp')
@@ -1353,13 +1450,71 @@ class MyPlugin(Star):
             logger.warning(f"⚠️ 写入图片缓存失败 {cache_key}: {e}")
         return data
 
+    def _store_local_asset(self, subdir: str, key: str, data: bytes):
+        """把下载到的图写进 plugin_data/assets/<subdir>/
+
+        key 用 cache_key（card_30_member_character / jkt_jkt_001_100001）。
+        落地的文件名必须和 _card_local_names / _jacket_local_names 产生的一致，
+        否则下次同步检测不到，会反复重下。
+        """
+        try:
+            assets_dir = getattr(self, 'assets_dir', None)
+            if assets_dir is None:
+                return
+            ext = self._ext_for(data)
+            if ext == "bin":
+                return
+            # cache_key -> 本地文件名（与 local_names 保持一致的来源）
+            stem = key
+            for prefix in ("card_", "jkt_"):
+                if stem.startswith(prefix):
+                    stem = stem[len(prefix):]
+                    break
+            dest = assets_dir / subdir / f"{stem}.{ext}"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_suffix('.tmp')
+            tmp.write_bytes(data)
+            tmp.replace(dest)
+        except Exception as e:
+            logger.warning(f"⚠️ 写入预置资源失败 {key}: {e}")
+
+    @staticmethod
+    def _ext_for(data: bytes) -> str:
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "webp"
+        if data.startswith(bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])):
+            return "png"
+        if data[:3] == bytes([0xFF, 0xD8, 0xFF]):
+            return "jpg"
+        return "bin"
+
+    def _find_local_asset(self, name: str) -> str:
+        """返回本地已存在的预置资源路径（持久化目录优先，其次插件自带），没有则返回 ''"""
+        bases = []
+        assets_dir = getattr(self, 'assets_dir', None)
+        if assets_dir:
+            bases.append(assets_dir)
+        plugin_dir = getattr(self, 'plugin_dir', None)
+        if plugin_dir:
+            bases.append(plugin_dir / "data" / "assets")
+        for base in bases:
+            for ext in ("png", "webp", "jpg", "jpeg"):
+                path = base / f"{name}.{ext}"
+                try:
+                    if path.is_file() and path.stat().st_size > 1024:
+                        return str(path)
+                except Exception:
+                    continue
+        return ""
+
     async def _fetch_image_async(self, url: str, cache_key: str, ttl_hours: int = 168,
-                                 fallback_urls=()):
+                                 fallback_urls=(), local_names=(), target_subdir=None):
         """在 executor 里执行下载，避免阻塞事件循环（否则整个机器人会被卡住）"""
         import asyncio
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            self._executor, self._fetch_image, url, cache_key, ttl_hours, fallback_urls
+            self._executor, self._fetch_image, url, cache_key, ttl_hours,
+            fallback_urls, local_names, target_subdir
         )
 
     def _card_asset_urls(self, asset_id: int, kind: str):
@@ -1367,10 +1522,69 @@ class MyPlugin(Star):
         urls = [m["base"] + m["card"].format(id=asset_id, kind=kind) for m in ASSET_MIRRORS]
         return urls[0], urls[1:]
 
+    def _card_local_names(self, asset_id: int, kind: str):
+        """预置立绘/背景在 data/assets/cards/ 下的候选文件名（不含扩展名）
+
+        两种源的扩展名不同（haneoka 是 png，bdon 是 webp），所以把两种都列出来，
+        由 _read_local_asset 挑第一个真实存在的。
+        """
+        return [f"cards/{asset_id}_{kind}"]
+
+    def _read_local_asset(self, name: str) -> bytes:
+        """读本地预置图片，读不到返回 b''
+
+        查找顺序：plugin_data/assets/（首次运行自动下载落地的位置）优先，
+        插件自带 data/assets/ 兜底。两者都没有才走云端。
+
+        截断的文件也能通过魔数检查（PNG 头是完整的），所以必须让 Pillow 真正
+        解码一遍；只查头会把半张图当成好图返回，图层照样空白。
+
+        name 可以带扩展名（"cards/30_member_character.png"），也可以不带
+        （"cards/30_member_character"），后者会依次试常见图片扩展名。
+        """
+        if not name:
+            return b""
+        # 两个目录都可能没初始化（例如只构造了部分属性的测试实例），逐个兜着
+        bases = []
+        assets_dir = getattr(self, 'assets_dir', None)
+        if assets_dir is not None:
+            bases.append(assets_dir)
+        plugin_dir = getattr(self, 'plugin_dir', None)
+        if plugin_dir is not None:
+            bases.append(plugin_dir / "data" / "assets")
+        if not bases:
+            return b""
+        known = ("png", "webp", "jpg", "jpeg", "gif")
+        if name.lower().endswith(tuple(f".{e}" for e in known)):
+            candidates = [base / name for base in bases]
+        else:
+            candidates = []
+            for base in bases:
+                candidates.extend(base / f"{name}.{e}" for e in known)
+        for path in candidates:
+            try:
+                if not path.is_file():
+                    continue
+                data = path.read_bytes()
+                if not self._looks_like_image(data):
+                    logger.warning(f"🧹 预置图片不是有效图片，已忽略 {path.name}")
+                    continue
+                if not self._decodes(data):
+                    logger.warning(f"🧹 预置图片已截断，已忽略 {path.name}")
+                    continue
+                return data
+            except Exception:
+                continue
+        return b""
+
     def _jacket_urls(self, jacket_asset: str):
         """返回 (主源URL, 备选源URL列表)"""
         urls = [m["base"] + m["jacket"].format(name=jacket_asset) for m in ASSET_MIRRORS]
         return urls[0], urls[1:]
+
+    def _jacket_local_names(self, jacket_asset: str):
+        """预置曲绘在 data/assets/jackets/ 下的候选文件名（不含扩展名）"""
+        return [f"jackets/{jacket_asset}"]
 
     def _card_asset_url(self, asset_id: int, kind: str, ext: str = "png") -> str:
         """仅主源 URL（兼容旧调用方），带备选源请用 _card_asset_urls"""
@@ -1455,6 +1669,9 @@ class MyPlugin(Star):
 
         立绘与背景并行下载；单个失败只让对应图层留空，不影响其余部分渲染。
         整体加一层时间上限，避免 CDN 抽风时把签到流程拖住。
+
+        超时那一刻已经拿到的图层会被保留：一张卡只有一半预置时，
+        不该让缺的那半边把已经到手的预置图也一起拖没。
         """
         import asyncio
 
@@ -1467,7 +1684,9 @@ class MyPlugin(Star):
             try:
                 url, fallbacks = self._card_asset_urls(asset_id, kind)
                 data = await self._fetch_image_async(
-                    url, f"card_{asset_id}_{kind}", fallback_urls=fallbacks)
+                    url, f"card_{asset_id}_{kind}", fallback_urls=fallbacks,
+                    local_names=self._card_local_names(asset_id, kind),
+                    target_subdir="cards")
                 return self._image_to_base64(data, max_size=max_size, quality=quality,
                                              fmt="WEBP", cache_key=key)
             except Exception as e:
@@ -1477,19 +1696,22 @@ class MyPlugin(Star):
         # 单张已有 download_timeout，这里再给整体一个略宽的上限兜底。
         # 4 张图 2 并发，每张最多 2 个源 x 2 次尝试：预算 = 超时 * 4 * 2 轮 + 余量
         budget = self.download_timeout * 8 + 10
+        tasks = [
+            asyncio.ensure_future(_one("member_character", 1440, 80)),
+            asyncio.ensure_future(_one("member_background", 1440, 80)),
+        ]
         try:
-            return await asyncio.wait_for(
-                asyncio.gather(
-                    # 源图本身只有 1440x1920，最终又要压到 ~100KB，
-                    # 这里用 1440 / quality 80 兼顾放大后的清晰度与 HTML 体积
-                    _one("member_character", 1440, 80),
-                    _one("member_background", 1440, 80),
-                ),
-                timeout=budget,
-            )
+            return await asyncio.wait_for(asyncio.gather(*tasks), timeout=budget)
         except asyncio.TimeoutError:
-            logger.warning(f"⚠️ 卡面 {asset_id} 下载超时（{budget:.0f}s），本次跳过图片层")
-            return "", ""
+            logger.warning(f"⚠️ 卡面 {asset_id} 下载超时（{budget:.0f}s），本次跳过未完成的图层")
+            # gather 被取消时已完成的任务仍有结果，取出来免得白跑一趟
+            results = []
+            for t in tasks:
+                if t.done() and not t.cancelled() and t.exception() is None:
+                    results.append(t.result())
+                else:
+                    results.append("")
+            return tuple(results)
 
     async def prefetch_signin_assets(self, asset_id: int, jackets):
         """一次性并发拉取签到需要的全部图片：立绘 + 背景 + 两首歌曲封面
@@ -1507,7 +1729,9 @@ class MyPlugin(Star):
             try:
                 url, fallbacks = self._card_asset_urls(asset_id, kind)
                 data = await self._fetch_image_async(
-                    url, f"card_{asset_id}_{kind}", fallback_urls=fallbacks)
+                    url, f"card_{asset_id}_{kind}", fallback_urls=fallbacks,
+                    local_names=self._card_local_names(asset_id, kind),
+                    target_subdir="cards")
                 return self._image_to_base64(data, max_size=1440, quality=80,
                                              fmt="WEBP", cache_key=key)
             except Exception as e:
@@ -1524,7 +1748,9 @@ class MyPlugin(Star):
             try:
                 url, fallbacks = self._jacket_urls(jacket)
                 data = await self._fetch_image_async(
-                    url, f"jkt_{jacket}", fallback_urls=fallbacks)
+                    url, f"jkt_{jacket}", fallback_urls=fallbacks,
+                    local_names=self._jacket_local_names(jacket),
+                    target_subdir="jackets")
                 return self._image_to_base64(data, max_size=200, quality=60,
                                              fmt="WEBP", cache_key=key)
             except Exception as e:
@@ -1537,19 +1763,24 @@ class MyPlugin(Star):
 
         # 4 张图 2 并发，每张最多 2 个源 x 2 次尝试：预算 = 超时 * 4 * 2 轮 + 余量
         budget = self.download_timeout * 8 + 10
+        tasks = [
+            asyncio.ensure_future(_card("member_character")),
+            asyncio.ensure_future(_card("member_background")),
+            asyncio.ensure_future(_cover(jackets[0])),
+            asyncio.ensure_future(_cover(jackets[1])),
+        ]
         try:
-            return await asyncio.wait_for(
-                asyncio.gather(
-                    _card("member_character"),
-                    _card("member_background"),
-                    _cover(jackets[0]),
-                    _cover(jackets[1]),
-                ),
-                timeout=budget,
-            )
+            return await asyncio.wait_for(asyncio.gather(*tasks), timeout=budget)
         except asyncio.TimeoutError:
-            logger.warning(f"⚠️ 签到图片批量下载超时（{budget:.0f}s），本次跳过图片层")
-            return "", "", "", ""
+            logger.warning(f"⚠️ 签到图片批量下载超时（{budget:.0f}s），保留已完成的图层")
+            # 预置图是毫秒级回来的，云端那几张超时时不能把它们一起丢掉
+            results = []
+            for t in tasks:
+                if t.done() and not t.cancelled() and t.exception() is None:
+                    results.append(t.result())
+                else:
+                    results.append("")
+            return tuple(results)
 
     async def _get_song_cover(self, jacket_asset: str) -> str:
         """下载歌曲封面（带本地缓存 + 已编码缓存）并转为 base64"""
@@ -1562,7 +1793,9 @@ class MyPlugin(Star):
         try:
             url, fallbacks = self._jacket_urls(jacket_asset)
             data = await self._fetch_image_async(
-                url, f"jkt_{jacket_asset}", fallback_urls=fallbacks)
+                url, f"jkt_{jacket_asset}", fallback_urls=fallbacks,
+                local_names=self._jacket_local_names(jacket_asset),
+                target_subdir="jackets")
             return self._image_to_base64(data, max_size=200, quality=60, fmt="WEBP", cache_key=key)
         except Exception as e:
             logger.warning(f"⚠️ 下载歌曲封面失败 {jacket_asset}: {e}")

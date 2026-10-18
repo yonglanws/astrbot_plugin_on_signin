@@ -661,6 +661,7 @@ inst8.cache_dir = tmp_inst_dir / "cache8"
 inst8.download_timeout = 1.0          # 预算 = 1.0*2+5 = 7s
 inst8._executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
 inst8.data_dir = tmp_inst_dir
+inst8.plugin_dir = tmp_inst_dir
 inst8.master_dir = tmp_inst_dir / "masterdata"
 inst8._sync_lock = threading.Lock()
 inst8._sync_state = {"last_sync": None, "running": False}
@@ -686,7 +687,8 @@ try:
 
     res, el = asyncio.run(asyncio.wait_for(_budget_probe(), timeout=30))
     check("hanging download bounded by overall budget", el < 25, f"{el:.1f}s")
-    check("bounded download returns empty layers", res == ("", ""), str(res))
+    check("bounded download returns empty layers when nothing is preset",
+          res == ("", ""), str(res))
 except Exception as e:
     check("hanging download bounded by overall budget", False, repr(e)[:200])
 finally:
@@ -703,6 +705,7 @@ inst8b.cache_dir = tmp_inst_dir / "cache8b"
 inst8b.download_timeout = 2
 inst8b._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 inst8b.data_dir = tmp_inst_dir
+inst8b.plugin_dir = tmp_inst_dir
 inst8b.master_dir = tmp_inst_dir / "masterdata"
 inst8b._sync_lock = threading.Lock()
 inst8b._sync_state = {"last_sync": None, "running": False}
@@ -744,6 +747,7 @@ inst8c.cache_dir = tmp_inst_dir / "cache8c"
 inst8c.download_timeout = 2
 inst8c._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 inst8c.data_dir = tmp_inst_dir
+inst8c.plugin_dir = tmp_inst_dir
 inst8c.master_dir = tmp_inst_dir / "masterdata"
 inst8c._sync_lock = threading.Lock()
 inst8c._sync_state = {"last_sync": None, "running": False}
@@ -788,14 +792,22 @@ inst8d.cache_dir = tmp_inst_dir / "cache8d"
 inst8d.download_timeout = 2
 inst8d._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 inst8d.data_dir = tmp_inst_dir
+inst8d.plugin_dir = tmp_inst_dir
 inst8d.master_dir = tmp_inst_dir / "masterdata"
 inst8d._sync_lock = threading.Lock()
 inst8d._sync_state = {"last_sync": None, "running": False}
 inst8d.ASSET_HEADERS = {"User-Agent": "x"}
 
 from PIL import Image as _PILImage
+import random as _random
 _buf = io.BytesIO()
-_PILImage.new("RGB", (64, 64), (10, 120, 200)).save(_buf, format="PNG")
+# 带噪点的 128x128：体积要跨过 _find_local_asset 的 1KB 下限，
+# 也更接近真实资源（纯色图压完只有几百字节）
+_rnd = _random.Random(20261018)
+_noise = _PILImage.new("RGB", (128, 128))
+_noise.putdata([(_rnd.randrange(256), _rnd.randrange(256), _rnd.randrange(256))
+                for _ in range(128 * 128)])
+_noise.save(_buf, format="PNG")
 _full_png = _buf.getvalue()
 _trunc_png = _full_png[:len(_full_png) // 2]   # 头完整、数据截断
 
@@ -837,6 +849,7 @@ inst8e.cache_dir = tmp_inst_dir / "cache8e"
 inst8e.download_timeout = 2
 inst8e._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 inst8e.data_dir = tmp_inst_dir
+inst8e.plugin_dir = tmp_inst_dir
 inst8e.master_dir = tmp_inst_dir / "masterdata"
 inst8e._sync_lock = threading.Lock()
 inst8e._sync_state = {"last_sync": None, "running": False}
@@ -894,6 +907,7 @@ inst8f.cache_dir = tmp_inst_dir / "cache8f"
 inst8f.download_timeout = 2
 inst8f._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 inst8f.data_dir = tmp_inst_dir
+inst8f.plugin_dir = tmp_inst_dir
 inst8f.master_dir = tmp_inst_dir / "masterdata"
 inst8f._sync_lock = threading.Lock()
 inst8f._sync_state = {"last_sync": None, "running": False}
@@ -926,6 +940,7 @@ inst8g.cache_dir = tmp_inst_dir / "cache8g"
 inst8g.download_timeout = 2
 inst8g._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 inst8g.data_dir = tmp_inst_dir
+inst8g.plugin_dir = tmp_inst_dir
 inst8g.master_dir = tmp_inst_dir / "masterdata"
 inst8g._sync_lock = threading.Lock()
 inst8g._sync_state = {"last_sync": None, "running": False}
@@ -956,6 +971,7 @@ inst8h.cache_dir = tmp_inst_dir / "cache8h"
 inst8h.download_timeout = 1
 inst8h._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 inst8h.data_dir = tmp_inst_dir
+inst8h.plugin_dir = tmp_inst_dir
 inst8h.master_dir = tmp_inst_dir / "masterdata"
 inst8h._sync_lock = threading.Lock()
 inst8h._sync_state = {"last_sync": None, "running": False}
@@ -980,6 +996,76 @@ check("connection reset marks the source unhealthy", st.get('fails', 0) >= 1, st
 check("deprioritized after connection resets",
       [plugin_main.MyPlugin._source_key(inst8h, u) for u, _ in
        inst8h._order_sources([(_uh, 2), (_ub, 2)])][0].startswith("assets.bdon"))
+
+# --- 预置本地资源优先：服务器到 Cloudflare 频繁握手/读超时，本地有图就绝不联网 ---
+inst8i = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst8i.cache_dir = tmp_inst_dir / "cache8i"
+inst8i.download_timeout = 1
+inst8i._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst8i.data_dir = tmp_inst_dir
+inst8i.plugin_dir = tmp_inst_dir / "plug8i"
+inst8i.master_dir = tmp_inst_dir / "masterdata"
+inst8i._sync_lock = threading.Lock()
+inst8i._sync_state = {"last_sync": None, "running": False}
+inst8i.ASSET_HEADERS = {"User-Agent": "x"}
+
+local_assets = tmp_inst_dir / "plug8i" / "data" / "assets"
+(local_assets / "cards").mkdir(parents=True, exist_ok=True)
+(local_assets / "jackets").mkdir(parents=True, exist_ok=True)
+(local_assets / "cards" / "63_member_character.png").write_bytes(_full_png)
+(local_assets / "jackets" / "jkt_001_100001.webp").write_bytes(_full_png)
+
+check("card local names point at the preset tree",
+      inst8i._card_local_names(63, "member_character") == ["cards/63_member_character"],
+      str(inst8i._card_local_names(63, "member_character")))
+check("jacket local names point at the preset tree",
+      inst8i._jacket_local_names("jkt_001_100001") == ["jackets/jkt_001_100001"],
+      str(inst8i._jacket_local_names("jkt_001_100001")))
+check("reads a preset png",
+      inst8i._read_local_asset("cards/63_member_character") == _full_png)
+check("reads a preset webp",
+      inst8i._read_local_asset("jackets/jkt_001_100001") == _full_png)
+check("missing preset returns empty",
+      inst8i._read_local_asset("cards/999_member_character") == b"")
+check("empty name returns empty",
+      inst8i._read_local_asset("") == b"")
+
+# 魔数检查拦不住截断的图（PNG 头是完整的），必须靠 Pillow 解码
+check("_decodes accepts a full png", plugin_main.MyPlugin._decodes(_full_png))
+check("_decodes rejects a truncated png",
+      not plugin_main.MyPlugin._decodes(_trunc_png))
+check("_decodes rejects garbage", not plugin_main.MyPlugin._decodes(b"not an image at all" * 4))
+
+# 预置存在时，即使网络全挂也必须拿到图，且一次请求都不发
+_hit_net = {"n": 0}
+
+
+def _urlopen_must_not_run(req, timeout=None):
+    _hit_net["n"] += 1
+    raise OSError("network must not be touched when a preset exists")
+
+
+plugin_main.urllib.request.urlopen = _urlopen_must_not_run
+try:
+    _got = inst8i._fetch_image(_uh, "k_local", fallback_urls=[_ub],
+                               local_names=["cards/63_member_character"])
+    check("preset image is returned without any network call", _got == _full_png)
+    check("no network request was made", _hit_net["n"] == 0, str(_hit_net))
+    check("preset image is written to the disk cache",
+          (inst8i.cache_dir / "k_local.bin").exists())
+except Exception as e:
+    check("preset image is returned without any network call", False, repr(e)[:90])
+    check("no network request was made", False, "exception before assertion")
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
+# 预置损坏时不能静默用坏图，要落到网络重试
+(local_assets / "cards" / "63_member_character.png").write_bytes(b"<html>404</html>" + b"x" * 60)
+check("corrupt preset is ignored",
+      inst8i._read_local_asset("cards/63_member_character") == b"")
+(local_assets / "cards" / "63_member_character.png").write_bytes(_trunc_png)
+check("truncated preset is ignored (magic alone is not enough)",
+      inst8i._read_local_asset("cards/63_member_character") == b"")
 
 print()
 print("=" * 70)
@@ -1266,6 +1352,39 @@ except Exception as e:
 finally:
     plugin_main.urllib.request.urlopen = orig3
 
+# --- 部分预置：云端挂掉时不能把已经拿到的预置图层一起丢掉 ---
+inst_partial = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst_partial.cache_dir = tmp_inst_dir / "cache_partial"
+inst_partial.download_timeout = 1          # 预算 = 1*8+10 = 18s
+inst_partial._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst_partial.data_dir = tmp_inst_dir
+inst_partial.master_dir = tmp_inst_dir / "masterdata"
+inst_partial._sync_lock = threading.Lock()
+inst_partial._sync_state = {"last_sync": None, "running": False}
+inst_partial.ASSET_HEADERS = {"User-Agent": "x"}
+inst_partial.plugin_dir = tmp_inst_dir / "plug_partial"
+
+partial_dir = tmp_inst_dir / "plug_partial" / "data" / "assets" / "cards"
+partial_dir.mkdir(parents=True, exist_ok=True)
+# 只预置立绘，背景留给云端（云端会挂）
+(partial_dir / "63_member_character.png").write_bytes(_full_png)
+
+plugin_main.urllib.request.urlopen = _hang_urlopen
+try:
+    async def _partial_probe():
+        t0 = asyncio.get_running_loop().time()
+        r = await inst_partial._get_card_images(63)
+        return r, asyncio.get_running_loop().time() - t0
+    r2, el2 = asyncio.run(asyncio.wait_for(_partial_probe(), timeout=40))
+    check("partial preset keeps the finished layer",
+          bool(r2[0]) and r2[1] == "", str([bool(x) for x in r2]))
+    check("partial preset still bounded by budget", el2 < 35, f"{el2:.1f}s")
+except Exception as e:
+    check("partial preset keeps the finished layer", False, repr(e)[:200])
+    check("partial preset still bounded by budget", False, "exception")
+finally:
+    plugin_main.urllib.request.urlopen = orig_urlopen
+
 # 6) 下载重试（主源失败先原地重试，再换备选源）
 check("download retries up to 2 times per source", "[(url, 2)]" in src_main)
 check("retry backs off (no hammering)", "time.sleep(0.4" in src_main)
@@ -1382,6 +1501,92 @@ for s in songs[:12]:
         mirror_jacket_bad.append((j, err))
     time.sleep(0.35)
 check("mirror serves sampled 12 jackets", not mirror_jacket_bad, str(mirror_jacket_bad[:5]))
+
+print()
+print("=" * 70)
+print("TEST 8: 资产自动同步（plugin_data 落地 + 缺失检测）")
+print("=" * 70)
+
+inst_as = plugin_main.MyPlugin.__new__(plugin_main.MyPlugin)
+inst_as.cache_dir = tmp_inst_dir / "cache_as"
+inst_as.assets_dir = tmp_inst_dir / "pd_assets"      # 模拟 plugin_data/assets
+inst_as.download_timeout = 1
+inst_as._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+inst_as.data_dir = tmp_inst_dir
+inst_as.master_dir = tmp_inst_dir / "masterdata"
+inst_as._sync_lock = threading.Lock()
+inst_as._sync_state = {"last_sync": None, "running": False}
+inst_as.ASSET_HEADERS = {"User-Agent": "x"}
+inst_as.plugin_dir = tmp_inst_dir
+
+# 下载成功的图必须落到 plugin_data/assets/<subdir>/，文件名与查找用的对得上
+# cache_key 与生产一致：卡面是 card_<id>_<kind>，封面是 jkt_<jacket>
+inst_as._store_local_asset("cards", "card_30_member_character", _full_png)
+inst_as._store_local_asset("jackets", "jkt_jkt_001_100001", _full_png)
+check("downloaded card lands in plugin_data with the lookup name",
+      (inst_as.assets_dir / "cards" / "30_member_character.png").is_file())
+check("downloaded jacket lands in plugin_data with the lookup name",
+      (inst_as.assets_dir / "jackets" / "jkt_001_100001.png").is_file())
+check("stored card is findable by _find_local_asset",
+      bool(inst_as._find_local_asset("cards/30_member_character")))
+check("stored jacket is findable by _find_local_asset",
+      bool(inst_as._find_local_asset("jackets/jkt_001_100001")))
+check("missing asset is not reported as present",
+      inst_as._find_local_asset("cards/999_member_character") == "")
+check("_read_local_asset sees plugin_data before the plugin bundle",
+      inst_as._read_local_asset("cards/30_member_character") == _full_png)
+check("_ext_for recognises png", plugin_main.MyPlugin._ext_for(_full_png) == "png")
+check("_ext_for rejects garbage", plugin_main.MyPlugin._ext_for(b"nope" * 20) == "bin")
+
+# 让 card 30 两层都落地，这样"已存的不重下"才是干净的可判定场景
+inst_as._store_local_asset("cards", "card_30_member_background", _full_png)
+
+# 缺失检测：只有缺文件时才该触发下载，已有的一律跳过
+_dataset = {
+    "cards": [
+        {"asset_id": 30},    # 两层都已落地，不该下载
+        {"asset_id": 31},    # 两层都缺，该下载
+    ],
+    "songs": [
+        {"jacket": "jkt_001_100001"},   # 已落地，不该下载
+        {"jacket": "jkt_002_100043"},   # 缺，该下载
+    ],
+}
+_dl_calls = []
+
+
+def _rec_fetch(url, cache_key, ttl_hours=168, fallback_urls=(), local_names=(),
+               target_subdir=None):
+    _dl_calls.append((cache_key, target_subdir))
+    return _full_png
+
+
+inst_as._fetch_image = _rec_fetch
+_t1 = inst_as._sync_assets_if_needed(_dataset)
+if _t1 is not None:
+    _t1.join(timeout=30)
+check("only missing layers trigger a download (3 gaps)", len(_dl_calls) == 3,
+      str(len(_dl_calls)))
+check("card gaps are queued for the cards subdir",
+      all(sd == "cards" for k, sd in _dl_calls if k.startswith("card_")),
+      str(_dl_calls))
+check("jacket gaps are queued for the jackets subdir",
+      all(sd == "jackets" for k, sd in _dl_calls if k.startswith("jkt_")),
+      str(_dl_calls))
+check("already stored card layer is not re-downloaded",
+      not any("card_30_member" in k for k, _ in _dl_calls), str(_dl_calls))
+check("already stored jacket is not re-downloaded",
+      not any("jkt_001_100001" in k for k, _ in _dl_calls), str(_dl_calls))
+
+# 什么都不缺时，一次下载都不该发起
+_dl_calls.clear()
+_t2 = inst_as._sync_assets_if_needed({
+    "cards": [{"asset_id": 30}],
+    "songs": [{"jacket": "jkt_001_100001"}],
+})
+if _t2 is not None:
+    _t2.join(timeout=30)
+check("no download when everything is present", not _dl_calls, str(_dl_calls))
 
 print()
 print("=" * 70)
